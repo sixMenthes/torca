@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+#import torch.nn as nn
 
 
 def round_ste(z):
@@ -9,24 +9,13 @@ def round_ste(z):
 def compute_basis(levels):
     return torch.cat([torch.tensor([1]), torch.tensor(levels).cumprod(dim=-1)])
     
-#def FSQ(z, levels):
-#    sigmoid = nn.Sigmoid()
-#    z = 2 * sigmoid(1.6 * z) - 1
-#    half_width = (levels - 1)/2
-#    z_scaled = z * half_width 
-#    z_hat = round_ste(z)
-#    z_quantized = z_hat / half_width
-
-
-
-
 
 class FSQ:
     def __init__(self, levels: list[int], eps: float = 1e-3):
         self._levels = torch.tensor(levels)
         self._eps = eps
         self._basis = torch.cat([torch.tensor([1]), torch.cumprod(self._levels[:-1], dim=0)])
-        codebook_size = torch.prod(self._levels)
+        self._implicit_codebook = self.indices_to_codes(torch.arange(self.codebook_size))
 
     @property
     def num_dimensions(self) -> int:
@@ -34,12 +23,11 @@ class FSQ:
 
     @property
     def codebook_size(self) -> int:
-        pass
-        #return self._levels.prod()
+        return torch.prod(self._levels)
 
     @property 
     def codebook(self):
-        pass
+        return self._implicit_codebook
 
     def bound(self, z: torch.Tensor):
         half_l = (self._levels - 1) * (1 - self._eps) / 2
@@ -66,7 +54,9 @@ class FSQ:
         return (zhat * self._basis).sum(axis=-1).to(torch.int32)
 
     def indices_to_codes(self, indices):
-        pass
+        indices = indices.unsqueeze(-1)
+        codes_non_centered = torch.remainder(torch.floor_divide(indices, self._basis), self._levels)
+        return self._scale_and_shift_inverse(codes_non_centered)
 
 
 

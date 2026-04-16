@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torchaudio
+from ifsq import FSQ
 from foundation_model.BEATs import BEATs, BEATsConfig
 
 def load_beats(beats_ckpt):
@@ -23,9 +25,15 @@ class Encoder(nn.Module):
         super().__init__()
         self.backbone = load_beats(beats_ckpt)
         self.proj = nn.Linear(768, len(levels))
-        #self.fsq = FSQ(levels)
+        self.fsq = FSQ(levels)
 
-    def forward(self, h):
-        h = self.backbone(h)
-        return h
+    def forward(self, path_to_audio):
+        audio = torchaudio.load_with_torchcodec(path_to_audio)[0]
+        h = self.backbone.extract_features(audio, padding_mask=torch.zeros_like(audio).bool())[0]
+        h = self.proj(h)
+        h = self.fsq.quantize(h)
+        return self.fsq.codes_to_indices(h)
 
+enc = Encoder('../models/BEATs_iter3.pt', [8, 6, 6])
+over = '/Users/leo/projects/orcas/ds/overlaps.wav'
+x = enc.forward(over)
