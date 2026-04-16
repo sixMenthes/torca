@@ -16,9 +16,16 @@ def load_beats(beats_ckpt):
 
     return BEATs_model
 
+    
+
 class Encoder(nn.Module):
     def __init__(self, beats_ckpt, levels):
         super().__init__()
         self.backbone = load_beats(beats_ckpt)
         self.proj = nn.Linear(768, len(levels))
-        self.fsq = FSQ(levels)
+        #self.fsq = FSQ(levels)
+
+    def forward(self, h):
+        h = self.backbone(h)
+        return h
+
