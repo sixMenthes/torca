@@ -4,7 +4,7 @@ import torch
 
 def round_ste(z):
     zhat = torch.round(z)
-    return z + (zhat - z).detach()
+    return z + (zhat - z).detach() # stop-gradient trick!
 
 def compute_basis(levels):
     return torch.cat([torch.tensor([1]), torch.tensor(levels).cumprod(dim=-1)])

@@ -4,7 +4,13 @@
 
 - [x] Try out encoder
 - [x]  FSQ
-- [ ] Classification head (transformer annotated)
+- [x] Fix bugs
+- [x] Positional encodings (ALiBi 2D, possibly with gating) (ALTHOUGH, what about the grid size)
+- [ ] Masking strategy + mask token
+- [ ] Loss function (combined)
+- [ ] Dataset class
+- [ ] Training loop
+- [ ] Validation loop
 - [ ] Mixed loss (which supervised loss: ecotype? call type?)
 - [ ] Dataset (Test on DFO, 16 and 8 kHz)
 
