@@ -1,22 +1,27 @@
-# Orca Tokenizer
+# Orqa Tokenizer
 
-### TODO:
+### Todo:
 
 - [x] Try out encoder
 - [x]  FSQ
 - [x] Fix bugs
 - [x] Positional encodings (ALiBi 2D, possibly with gating) (ALTHOUGH, what about the grid size)
 - [ ] Masking strategy + mask token
-- [ ] Loss function (combined)
-- [ ] Dataset class
+- [ ] Mixed loss function (combined)
+- [ ] Dataset class & prep
 - [ ] Training loop
 - [ ] Validation loop
-- [ ] Mixed loss (which supervised loss: ecotype? call type?)
-- [ ] Dataset (Test on DFO, 16 and 8 kHz)
+- [ ] Denoising (PCEN or Power Law)
+
+### Decisions taken:
+- Quantized vectors directly as input (no learned embedding)
+- ALiBi 2D for positional encodings.Worth trying to gate it later!
+- Fixed length input at 2 seconds (check violin plots)
 
 
-### NEXT STEP:
+### Later:
 
+- Attention maps? :D
 - Adapt backbone model: fine-tune BEATs or MERT
 - Sequential tagger on calls ?
 - Optimisation for online use ? 
