@@ -78,8 +78,7 @@ class Torca(nn.Module):
         indices = self.quant(x) 
         h = self.emb(indices)
         if self.training:
-            #batch_size = x.size(0)
-            batch_size = 1
+            batch_size = x.size(0)
             tgt = indices.clone().long()
             masks = torch.stack([self.mask for _ in range(batch_size)])
             h[masks] = self.mask_token
@@ -91,7 +90,7 @@ class Torca(nn.Module):
             print(f"mask_logits = {mask_logits.size()}\n")
             mask_loss = F.cross_entropy(mask_logits[masks], tgt[masks])
             clas_loss = F.cross_entropy(clas_logits, labels)
-            return mask_loss + self.clas_loss_coef * clas_loss
+            return mask_loss + self.class_loss_weight * clas_loss
         return clas_logits
 
 cfgkw = TorcaConfig()
