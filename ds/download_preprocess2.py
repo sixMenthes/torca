@@ -30,13 +30,6 @@ MAX_WORKERS = 8
 GCLIENT = GCSFileSystem(token="anon")
 log = logging.getLogger("download_preprocess")
 
-SF_FORMATS = {".wav": "WAV", ".flac": "FLAC", ".aif": "AIFF", ".aiff": "AIFF", ".ogg": "OGG"}
-
-
-def sf_format(remote_path: str) -> str | None:
-    return SF_FORMATS.get(pathlib.Path(remote_path).suffix.lower())
-
-
 def local_mirror(remote_path: str) -> pathlib.Path:
     return LOCAL_ROOT / remote_path.removeprefix(GS_ROOT)
 
@@ -95,8 +88,7 @@ def process(remote_path: str, start_times, end_times) -> tuple[str, int]:
         return remote_path, 0
 
     written = 0
-    fmt = sf_format(remote_path)
-    with GCLIENT.open(remote_path, "rb") as fobj, sf.SoundFile(fobj, format=fmt) as snd:
+    with GCLIENT.open(remote_path, "rb") as fobj, sf.SoundFile(fobj) as snd:
         sr = snd.samplerate
         for st, et, out in pending:
             try:
