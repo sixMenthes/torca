@@ -74,7 +74,7 @@ class Torca(nn.Module):
         self.masked_head = nn.Linear(cfg.d_model, math.prod(cfg.fsq_levels))
 
     
-    def forward(self, x, padding_mask=None, labels=None):
+    def forward(self, x, labels=None, padding_mask=None):
         indices = self.quant(x) 
         h = self.emb(indices)
         if self.training:

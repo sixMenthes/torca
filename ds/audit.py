@@ -1,8 +1,9 @@
 import polars as pl
+import gcsfs
 
 pl.Config.set_tbl_rows(-1) #max rows shown
 pl.Config.set_tbl_cols(-1) #max cols shown
-#pl.Config.set_tbl_rows(-1)
+pl.Config.set_fmt_str_lengths(100)
 #pl.Config.set_tbl_rows(-1)
 
 
@@ -36,6 +37,8 @@ SCHEMA = {
     "HoldOut": pl.String,
     "Buzz": pl.Boolean
 }
+
+GCL = gcsfs.core.GCSFileSystem(token="anon")
 
 def load_raw():
     return pl.read_csv(PATH, infer_schema_length=0, null_values=["NA", "", "NaN", "null", "None"])
@@ -78,10 +81,63 @@ def load_clean():
             df_clean = df_clean.with_columns(pl.col(c).replace_strict({"FALSE": False, "TRUE": True, "1": True, "0": False}).cast(t, strict=True))
         else:
             df_clean = df_clean.with_columns(pl.col(c).cast(t, strict=True))
+    df_clean = df_clean.with_columns(NewPath = pl.col("FilePath").map_elements(mod_dl_path, return_dtype=pl.Utf8))
     return df_clean
+
+def mod_dl_path(old_path):
+    new_root = "gs://noaa-passive-bioacoustic/dclde/2027/dclde_2027_killer_whales/"
+    file_name = old_path.split("/")[-1]
+    parts_path = [s.lower() for s in old_path.split("/")[2:-1]]
+    new_path = "/".join(parts_path) + "/" + file_name
+    new_path = new_root + new_path
+    return new_path
+
+def check_data_exists(df_clean):
+    # mod_dl_path's reconstruction misses files whose bucket path renames a
+    # directory (Quin_Can→qc, Lime Kiln→lime-kiln, StraitofGeorgia→
+    # straitofgeorgia_globus-robertsbank, …) or whose CSV FilePath contains a
+    # stray "//". Audio basenames in the bucket are unique, so resolve by
+    # basename and overwrite NewPath with the actual cloud location.
+    gclient = GCL
+    root = "noaa-passive-bioacoustic/dclde/2027/dclde_2027_killer_whales/"
+    files = gclient.find(root)
+    by_basename = {p.rsplit("/", 1)[-1]: p for p in files}
+
+    df_clean = df_clean.with_columns(
+        BaseName = pl.col("FilePath").str.split("/").list.last(),
+    )
+    df_clean = df_clean.with_columns(
+        ResolvedPath = pl.col("BaseName").replace_strict(
+            by_basename, default=None, return_dtype=pl.Utf8
+        ),
+    )
+    df_clean = df_clean.with_columns(
+        NewFileOk = pl.col("ResolvedPath").is_not_null(),
+        NewPath = pl.when(pl.col("ResolvedPath").is_not_null())
+                    .then("gs://" + pl.col("ResolvedPath"))
+                    .otherwise(pl.col("NewPath")),
+    ).drop("BaseName", "ResolvedPath")
+
+    diff = df_clean.filter(pl.col("FileOk") & (~pl.col("NewFileOk")))
+    missing_counts = diff.group_by("Provider", "Dataset").agg(
+        pl.col("NewPath").n_unique().alias("n_missing")
+    ).sort("n_missing", descending=True)
+    missing_ds = diff.select("FilePath", "Provider", "Dataset", "NewPath")
+    return df_clean, missing_counts, missing_ds
+
+
+
+def check_file_exists(file_path):
+    gclient = GCL
+    root = "noaa-passive-bioacoustic/dclde/2027/dclde_2027_killer_whales/"
+    file_path = file_path.removeprefix("gs://")
+    files = set(gclient.find(root))
+    return file_path in files
 
 if __name__ == "__main__":
     df_clean = load_clean()
+    df_clean, missing_counts, missing_ds = check_data_exists(df_clean)
+    missing_ds.write_csv("./ds/missing_dclde.csv")
     df_clean.write_parquet("./ds/DCLDE_w_Buzzes.parquet")
 
 

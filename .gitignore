@@ -6,3 +6,4 @@ ds/beats_scripts/
 *.notes
 *.csv
 *.parquet
+*.ipynb
