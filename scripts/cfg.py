@@ -23,9 +23,9 @@ class TorcaConfig:
     span_len: int = 3
 
     # training
-    #lr: float = 1e-4
-    #batch_size: int = 32
-    #num_epochs: int = 100
+    lr: float = 1e-4
+    batch_size: int = 32
+    num_epochs: int = 100
     class_loss_weight: float = 1.0
 
     # paths

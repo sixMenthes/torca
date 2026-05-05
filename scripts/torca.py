@@ -48,10 +48,8 @@ class Quantizer(nn.Module):
         self.proj = nn.Linear(768, len(levels))
         self.fsq = FSQ(levels)
 
-    def forward(self, path_to_audio): # repair padding mask here
-        audio, sr = torchaudio.load_with_torchcodec(path_to_audio)
-        audio = torchaudio.functional.resample(audio, sr, 16000)
-        h = self.encoder.extract_features(audio, padding_mask=torch.zeros_like(audio).bool())[0]
+    def forward(self, soundwave, mask): # repair padding mask here
+        h, m = self.encoder.extract_features(soundwave, padding_mask=mask)
         h = self.proj(h)
         h = self.fsq.quantize(h)
         return self.fsq.codes_to_indices(h)

@@ -1,5 +1,22 @@
 import time
+from torch import nn
+from torch.optim import AdamW
+# Loshchilov & Hutter, "Decoupled Weight Decay Regularization" (ICLR 2019) — https://arxiv.org/abs/1711.05101
+
 from transformers import get_cosine_schedule_with_warmup
+# Loshchilov & Hutter, "SGDR: Stochastic Gradient Descent with Warm Restarts" (ICLR 2017) — https://arxiv.org/abs/1608.03983
+from torca import Torca
+from dataset import LocalDataset, collate_fn
+from torch.utils.data import DataLoader
+from cfg import TorcaConfig
+import polars as pl
+
+def make_model(cfg):
+    model = Torca(cfg)
+    for p in model.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+    return model
 
 class TrainState:
     step: int = 0
@@ -8,7 +25,6 @@ class TrainState:
 
 def run_epoch(data_iter,
     model,
-    loss_compute,
     optimizer,
     scheduler,
     mode="train",
@@ -43,6 +59,29 @@ def run_epoch(data_iter,
             )
             del loss
         return total_loss
+
+def train(train_data, val_data):
+    cfg = TorcaConfig()
+    model = make_model(cfg)
+    optimizer = AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.98), eps=1e-9)
+    batch_size = cfg["batch_size"]
+    for epoch in range(cfg["num_epochs"]):
+        model.train()
+        train_loss = run_epoch(
+            train_data, 
+            model, 
+            optimizer,
+            scheduler="hi",
+        )
+        val_loss = run_epoch(
+            val_data,
+            model,
+            optimizer,
+            scheduler="hi"
+        )
+
+
+    
 
 
 
