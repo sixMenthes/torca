@@ -70,7 +70,7 @@ def write_clip(
         chunk = librosa.resample(chunk, orig_sr=sr, target_sr=SAMPLE_RATE)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".part")
-    sf.write(str(tmp), chunk, SAMPLE_RATE)
+    sf.write(str(tmp), chunk, SAMPLE_RATE, format="WAV", subtype="PCM_16")
     tmp.rename(out)
     return True
 
