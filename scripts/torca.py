@@ -49,8 +49,10 @@ class Quantizer(nn.Module):
     def forward(self, soundwave, mask): # repair padding mask here
         h, m = self.encoder.extract_features(soundwave, padding_mask=mask)
         h = self.proj(h)
-        h = self.fsq.quantize(h)
-        return self.fsq.codes_to_indices(h), m
+        q = self.fsq.quantize(h)
+        indices = self.fsq.codes_to_indices(q)
+        #return self.fsq.codes_to_indices(h), m
+        return q, indices, m
 
     def train(self, mode=True):
         #override train to stop layer behaviour on BEATs. Besides the weights that are frozen (requires_grad_ == False), dropout would've messed things up
@@ -73,7 +75,8 @@ class Torca(nn.Module):
         else:
             self.class_weights = None
         self.quant = Quantizer(cfg.beats_ckpt, cfg.fsq_levels)
-        self.emb = nn.Embedding(math.prod(cfg.fsq_levels), cfg.d_model)
+        self.emb = nn.Linear(len(cfg.fsq_levels), cfg.d_model)
+        #self.emb = nn.Embedding(math.prod(cfg.fsq_levels), cfg.d_model)
         self.mask_token = nn.Parameter(torch.zeros(cfg.d_model))
         self.trans = clones(TransformerStack(d_model=cfg.d_model, number_heads=cfg.num_heads, d_ff=cfg.d_ff, bias=self.alibi_bias, dropout=cfg.dropout), cfg.num_layers)
         self.classif_head = nn.Linear(cfg.d_model, cfg.num_classes)
@@ -81,13 +84,13 @@ class Torca(nn.Module):
 
     
     def forward(self, x, labels=None, padding_mask=None):
-        indices, patch_mask = self.quant(x, padding_mask) 
+        q, indices, patch_mask = self.quant(x, padding_mask) 
         print(f"Padding mask sanity: \n {patch_mask.float().mean()}")
         print(f"Unique indices: \n {indices.unique().numel()}")
-        h = self.emb(indices.long())
+        h = self.emb(q)
         print(f"Pre-classifier features: \n {h.mean(dim=1).std(dim=0)}")
         batch_size = x.size(0)
-        tgt = indices.clone().long()
+        tgt = indices.long()
         masks = torch.stack([make_mask(seq_len=self.seq_len, grid_freq=self.grid_freq, obj_masked=self.mask_prob, span=self.span_len)for _ in range(batch_size)]).to(h.device)
         h[masks] = self.mask_token
         for layer in self.trans:
