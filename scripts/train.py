@@ -1,4 +1,6 @@
 import torch
+import math
+import torch.nn as nn
 import time
 import os
 from torch.optim import AdamW
@@ -21,6 +23,8 @@ def make_model(cfg, class_weights):
     for p in model.parameters():
         if p.dim() > 1:
             torch.nn.init.xavier_uniform_(p)
+    nn.init.normal_(model.quant.proj.weight, std=1)
+    nn.init.zeros_(model.quant.proj.bias)
     return model
 
 def calc_MAP(y, y_pred):
@@ -92,12 +96,17 @@ def run_epoch(data_iter,
 
     for i, batch in enumerate(data_iter):
         padded, mask, labels = (t.to(device) for t in batch)
-        if i % len(batch) == 0:
-            mask_loss, clas_loss, clas_logits = model.forward(padded, labels, mask, debug=True)
-        else:
-            mask_loss, clas_loss, clas_logits = model.forward(padded, labels, mask) 
+        mask_loss, clas_loss, clas_logits, indices  = model.forward(padded, labels, mask)
         # in order given by collate_fn: padded sw, mask, labels
         # forward expects: padded sw, labels, mask
+
+        # indices: (B, T) long, values in [0, K)
+        K = math.prod(TorcaConfig.fsq_levels)
+        counts = torch.bincount(indices.flatten(), minlength=K).float()
+        p = counts / counts.sum()
+        entropy = -(p * (p + 1e-9).log()).sum()
+        diversity_loss = -entropy   # maximize entropy
+        summed_loss = mask_loss + clas_loss * class_loss_weight + TorcaConfig.diversity_loss_weight * diversity_loss
         
         summed_loss =  mask_loss + class_loss_weight * clas_loss
         total_summed_loss += summed_loss.item()
@@ -119,9 +128,9 @@ def run_epoch(data_iter,
                 print(
                     (
                         "Epoch Step: %6d | Accumulation Step: %3d | Loss: %6.2f "
-                        + "| Learning Rate: %6.1e"
+                        + "| Learning Rate: %6.1e | Unique indices: %6d"
                     )
-                    % (i, n_accum, summed_loss.item(), lr)
+                    % (i, n_accum, summed_loss.item(), lr, indices.unique().numel())
                 )
         
         if mode == "eval":
@@ -152,6 +161,7 @@ def train():
 
     optimizer = AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.98), eps=1e-9)
     class_loss_weight = cfg.class_loss_weight
+    diversity_loss_weight = cfg.diversity_loss_weight
     total_steps = cfg.num_epochs * len(train_loader)
     scheduler_warmup = int(0.05 * total_steps)
     scheduler = get_cosine_schedule_with_warmup(optimizer=optimizer, num_warmup_steps= scheduler_warmup, num_training_steps=total_steps)

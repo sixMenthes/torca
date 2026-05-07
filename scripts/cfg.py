@@ -27,6 +27,7 @@ class TorcaConfig:
     batch_size: int = 32
     num_epochs: int = 100
     class_loss_weight: float = 1.0
+    diversity_loss_weight: float = 0.1
 
     # paths
     beats_ckpt: str = '../models/BEATs_iter3.pt' 

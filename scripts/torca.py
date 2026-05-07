@@ -86,10 +86,10 @@ class Torca(nn.Module):
     def forward(self, x, labels=None, padding_mask=None, debug=False):
         q, indices, patch_mask = self.quant(x, padding_mask) 
         h = self.emb(q)
-        if debug==True:
-            print(f"Padding mask sanity: \n {patch_mask.float().mean()}")
-            print(f"Unique indices: \n {indices.unique().numel()}")
-            print(f"Pre-classifier features: \n {h.mean(dim=1).std(dim=0).mean().item()}")
+        #if debug==True:
+        #    print(f"Padding mask sanity: \n {patch_mask.float().mean()}")
+        #    print(f"Unique indices: \n {indices.unique().numel()}")
+        #    print(f"Pre-classifier features: \n {h.mean(dim=1).std(dim=0).mean().item()}")
         batch_size = x.size(0)
         tgt = indices.long()
         masks = torch.stack([make_mask(seq_len=self.seq_len, grid_freq=self.grid_freq, obj_masked=self.mask_prob, span=self.span_len)for _ in range(batch_size)]).to(h.device)
@@ -97,9 +97,9 @@ class Torca(nn.Module):
         for layer in self.trans:
             h = layer(h, padding_mask=patch_mask)
         clas_logits = self.classif_head(h.mean(dim=1)) # for classification aggregate the prediction for all patches
-        if debug==True: 
-            print(f"Logits spread: \n {clas_logits.std(dim=0).mean()}")
+        #if debug==True: 
+        #    print(f"Logits spread: \n {clas_logits.std(dim=0).mean()}")
         mask_logits = self.masked_head(h)
         mask_loss = F.cross_entropy(mask_logits[masks], tgt[masks])
         clas_loss = F.cross_entropy(clas_logits, labels, weight=self.class_weights)
-        return mask_loss, clas_loss, clas_logits
+        return mask_loss, clas_loss, clas_logits, indices
