@@ -2,6 +2,7 @@
 __pycache__/
 models/*
 ds/*
+scripts/runs/
 !models/.gitkeep
 *.notes
 *.csv
