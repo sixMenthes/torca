@@ -1,7 +1,7 @@
 .venv/
 __pycache__/
 models/*
-ds/beats_scripts/
+ds/*
 !models/.gitkeep
 *.notes
 *.csv

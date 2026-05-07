@@ -8,7 +8,7 @@ class TorcaConfig:
     patch_size: int = 16
     time_step: int = 10
     num_mel_bins: int = 128
-    num_classes: int = 10
+    num_classes: int = 8
 
     # model
     d_model: int = 256

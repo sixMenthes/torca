@@ -13,7 +13,7 @@ def attention(query, key, value, alibi, padding_mask=None, dropout=None):
     if alibi is not None:
         scores = scores + alibi
     if padding_mask is not None:
-        scores = scores.masked_fill(padding_mask==0, -1e9)
+        scores = scores.masked_fill(padding_mask==1, -1e9)
     p_attn = scores.softmax(dim=-1)
     if dropout is not None:
         p_attn = dropout(p_attn)
@@ -29,7 +29,10 @@ class MultiHeadedAttention(nn.Module):
         self.h = number_heads
         self.d_k = d_model // number_heads
         self.linears = clones(nn.Linear(d_model, d_model), 4)
-        self.alibi_bias = alibi_bias
+        if alibi_bias is not None:
+            self.register_buffer("alibi_bias", alibi_bias)
+        else:
+            self.alibi_bias = None
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
 
@@ -38,7 +41,8 @@ class MultiHeadedAttention(nn.Module):
         Multi-Head attention adds an extra dimension, h, to our residual stream, which had dimensions [n_batches, seq_len, d_model]
         """
         if padding_mask is not None:
-            padding_mask = padding_mask.unsqueeze(1) # Add number_heads to the mask
+            padding_mask = padding_mask[:, None, None, :]
+            # Add number_heads to the mask
         
         n_batches = x.size(0)
 

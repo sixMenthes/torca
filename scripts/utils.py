@@ -2,6 +2,8 @@ import copy
 import torch
 import torch.nn as nn
 import math
+import polars as pl
+import numpy as np
 import itertools
 
 def clones(module, N):
@@ -11,21 +13,25 @@ def clones(module, N):
     """
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
-def make_mask(seq_len, grid_freq=8, obj_masked=0.15, span=3):
+def make_mask(seq_len, grid_freq=8, obj_masked=0.15, span=3, max_iter=1000):
     mask = torch.zeros(seq_len, dtype=torch.bool)
     prop = 0
-    while prop < obj_masked:
-        start = torch.randint(0, seq_len-span, (1,)).item()
-        direction = (torch.rand(1) < 0.5)
-        if direction: # mask horizontally 
-            stop = start + (grid_freq * (span + 1))
-            idxs = [i for i in range(start, stop, 8) if i < seq_len]
-        else: # mask vertically
-            idxs = [i for i in range(start, start+span+1) if i < seq_len]
-        mask[list(idxs)] = True
-        prop = mask.count_nonzero() / seq_len
+    for _ in range(max_iter):
+        if prop < obj_masked:
+            start = torch.randint(0, seq_len-span, (1,)).item()
+            direction = (torch.rand(1) < 0.5)
+            if direction: # mask horizontally 
+                stop = start + (grid_freq * (span + 1))
+                idxs = [i for i in range(start, stop, grid_freq) if i < seq_len]
+            else: # mask vertically
+                idxs = [i for i in range(start, start+span+1) if i < seq_len]
+            mask[list(idxs)] = True
+            prop = mask.count_nonzero() / seq_len
+        else:
+            break
 
     return mask
+
 
 
 def get_alibi(attention_heads, num_patches_freq, num_patches_time):
@@ -56,3 +62,17 @@ def get_alibi(attention_heads, num_patches_freq, num_patches_time):
             idxs.append(dist * slopes * -1)
     all_bias = torch.cat(idxs, dim=1)
     return all_bias.view(1, attention_heads, num_patches, num_patches)
+
+
+def get_class_coefs(train_dataset):
+    label_map = train_dataset.label_map
+    df = train_dataset.df
+    weights = [0]*len(label_map.keys())
+    for label, idx in label_map.items():
+        weights[idx] = df.filter(pl.col("Labels") == label).height
+    weights = 1.0 / np.maximum(weights, 1)
+    weights = weights * len(label_map.keys()) / weights.sum()
+    return weights
+
+
+

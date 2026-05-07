@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchaudio
 import math
 from utils import clones, make_mask, get_alibi
 from fsq import FSQ
-from cfg import TorcaConfig
 from foundation_model.BEATs import BEATs, BEATsConfig
 from classifier import TransformerStack
 
@@ -52,20 +50,31 @@ class Quantizer(nn.Module):
         h, m = self.encoder.extract_features(soundwave, padding_mask=mask)
         h = self.proj(h)
         h = self.fsq.quantize(h)
-        return self.fsq.codes_to_indices(h)
+        return self.fsq.codes_to_indices(h), m
+
+    def train(self, mode=True):
+        #override train to stop layer behaviour on BEATs. Besides the weights that are frozen (requires_grad_ == False), dropout would've messed things up
+        super().train(mode)
+        self.encoder.eval()
+        return self
 
 class Torca(nn.Module):
     #def __init__(self, chunk_duration, patch_size, time_step, num_mel_bins, num_classes, d_model, num_heads, d_ff, num_layers, dropout, fsq_levels, mask_prob, span_len, class_loss_weight, beats_ckpt):
-    def __init__(self, cfg):
+    def __init__(self, cfg, class_weights):
         super().__init__()
         self.grid_freq = int(cfg.num_mel_bins // cfg.patch_size)
-        self.grid_time = int((cfg.chunk_duration * 1000) / cfg.time_step // cfg.patch_size)
+        # self.grid_time = int((cfg.chunk_duration * 1000) / cfg.time_step // cfg.patch_size)
+        self.grid_time = 12
         self.seq_len = self.grid_freq * self.grid_time
-        self.class_loss_weight = cfg.class_loss_weight
-        self.alibi_bias = get_alibi(cfg.num_heads, self.grid_freq, self.grid_time)
+        self.mask_prob = cfg.mask_prob
+        self.span_len = cfg.span_len
+        self.register_buffer("alibi_bias", get_alibi(cfg.num_heads, self.grid_freq, self.grid_time)) #register buffer so that torch keeps track of the tensor
+        if class_weights is not None:
+            self.register_buffer("class_weights", class_weights.to(torch.float32))
+        else:
+            self.class_weights = None
         self.quant = Quantizer(cfg.beats_ckpt, cfg.fsq_levels)
         self.emb = nn.Embedding(math.prod(cfg.fsq_levels), cfg.d_model)
-        self.mask = make_mask(seq_len=self.seq_len, grid_freq=self.grid_freq, obj_masked=cfg.mask_prob, span=cfg.span_len)
         self.mask_token = nn.Parameter(torch.zeros(cfg.d_model))
         self.trans = clones(TransformerStack(d_model=cfg.d_model, number_heads=cfg.num_heads, d_ff=cfg.d_ff, bias=self.alibi_bias, dropout=cfg.dropout), cfg.num_layers)
         self.classif_head = nn.Linear(cfg.d_model, cfg.num_classes)
@@ -73,26 +82,16 @@ class Torca(nn.Module):
 
     
     def forward(self, x, labels=None, padding_mask=None):
-        indices = self.quant(x) 
-        h = self.emb(indices)
-        if self.training:
-            batch_size = x.size(0)
-            tgt = indices.clone().long()
-            masks = torch.stack([self.mask for _ in range(batch_size)])
-            h[masks] = self.mask_token
+        indices, patch_mask = self.quant(x, padding_mask) 
+        h = self.emb(indices.long())
+        batch_size = x.size(0)
+        tgt = indices.clone().long()
+        masks = torch.stack([make_mask(seq_len=self.seq_len, grid_freq=self.grid_freq, obj_masked=self.mask_prob, span=self.span_len)for _ in range(batch_size)]).to(h.device)
+        h[masks] = self.mask_token
         for layer in self.trans:
-            h = layer(h)
-        clas_logits = self.classif_head(h.mean(dim=1)) # for classification aggregate the prediction for all patches, worth trying mean pooling too
-        if self.training:
-            mask_logits = self.masked_head(h)
-            print(f"mask_logits = {mask_logits.size()}\n")
-            mask_loss = F.cross_entropy(mask_logits[masks], tgt[masks])
-            clas_loss = F.cross_entropy(clas_logits, labels)
-            return mask_loss + self.class_loss_weight * clas_loss
-        return clas_logits
-
-cfgkw = TorcaConfig()
-torkw = Torca(cfgkw)
-torkw.eval()
-over = '/Users/leo/projects/orcas/ds/3secs.wav'
-test_logits = torkw(over)
+            h = layer(h, padding_mask=patch_mask)
+        clas_logits = self.classif_head(h.mean(dim=1)) # for classification aggregate the prediction for all patches
+        mask_logits = self.masked_head(h)
+        mask_loss = F.cross_entropy(mask_logits[masks], tgt[masks])
+        clas_loss = F.cross_entropy(clas_logits, labels, weight=self.class_weights)
+        return mask_loss, clas_loss, clas_logits

@@ -21,8 +21,8 @@ import polars as pl
 import soundfile as sf
 from gcsfs.core import GCSFileSystem
 
-DF_PATH = "./ds/DCLDE_w_Buzzes.parquet"
-LOCAL_ROOT = pathlib.Path("./mnt/data/dclde_2027_killer_whales/")
+DF_PATH = "./ds/test_the_water.parquet"
+LOCAL_ROOT = pathlib.Path("./ds/try")
 GS_ROOT = "gs://noaa-passive-bioacoustic/dclde/2027/dclde_2027_killer_whales/"
 SAMPLE_RATE = 16_000
 MAX_WORKERS = 8
