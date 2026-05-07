@@ -92,11 +92,14 @@ def run_epoch(data_iter,
 
     for i, batch in enumerate(data_iter):
         padded, mask, labels = (t.to(device) for t in batch)
-        mask_loss, clas_loss, clas_logits = model.forward(padded, labels, mask) 
+        if i % len(batch) == 0:
+            mask_loss, clas_loss, clas_logits = model.forward(padded, labels, mask, debug=True)
+        else:
+            mask_loss, clas_loss, clas_logits = model.forward(padded, labels, mask) 
         # in order given by collate_fn: padded sw, mask, labels
         # forward expects: padded sw, labels, mask
         
-        summed_loss = 0* mask_loss + class_loss_weight * clas_loss
+        summed_loss =  mask_loss + class_loss_weight * clas_loss
         total_summed_loss += summed_loss.item()
         total_mask_loss += mask_loss.item()
         total_classification_loss += clas_loss.item()
