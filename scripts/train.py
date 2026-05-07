@@ -1,4 +1,5 @@
 import torch
+import time
 import os
 from torch.optim import AdamW
 import torch.nn.functional as F
@@ -33,6 +34,29 @@ def calc_MAP(y, y_pred):
         running_total += score
     average_precision["mean"] = running_total / n_classes
     return average_precision
+
+CKPT_PATH = "./runs/ckpt.pt"
+
+def save_ckpt(path, epoch, model, optimizer, scheduler, rows):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    torch.save({
+        "epoch": epoch,
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "rows": rows,
+    }, tmp)
+    os.replace(tmp, path)  # atomic — survives a crash mid-write
+
+def load_ckpt(path, model, optimizer, scheduler, device):
+    if not os.path.exists(path):
+        return 0, []
+    ckpt = torch.load(path, map_location=device)
+    model.load_state_dict(ckpt["model"])
+    optimizer.load_state_dict(ckpt["optimizer"])
+    scheduler.load_state_dict(ckpt["scheduler"])
+    return ckpt["epoch"] + 1, ckpt["rows"]   # resume from next epoch
 
 
 class TrainState:
@@ -72,7 +96,7 @@ def run_epoch(data_iter,
         # in order given by collate_fn: padded sw, mask, labels
         # forward expects: padded sw, labels, mask
         
-        summed_loss = mask_loss + class_loss_weight * clas_loss
+        summed_loss = 0* mask_loss + class_loss_weight * clas_loss
         total_summed_loss += summed_loss.item()
         total_mask_loss += mask_loss.item()
         total_classification_loss += clas_loss.item()
@@ -117,27 +141,26 @@ def train():
     class_weights = torch.from_numpy(get_class_coefs(train_dataset)).float()
     class_maps = train_dataset.label_map
     val_dataset = LocalDataset(pl.read_parquet("../ds/DCLDE_train_manifest.parquet").filter(pl.col("Split") == "val"), class_maps)
-    train_loader = DataLoader(train_dataset, 32, shuffle=True, collate_fn=collate_fn)
+    train_loader = DataLoader(train_dataset, 32, shuffle=True, drop_last=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, 5, shuffle=False, collate_fn=collate_fn)
     cfg = TorcaConfig()
     model = make_model(cfg, class_weights)
     class_weights = torch.from_numpy(get_class_coefs(train_dataset)).float()
-    print("class_weights:", class_weights.shape, class_weights)
-    print("label_map:", train_dataset.label_map)
-    print("num_classes (cfg):", cfg.num_classes)
 
     optimizer = AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.98), eps=1e-9)
     class_loss_weight = cfg.class_loss_weight
     total_steps = cfg.num_epochs * len(train_loader)
     scheduler_warmup = int(0.05 * total_steps)
     scheduler = get_cosine_schedule_with_warmup(optimizer=optimizer, num_warmup_steps= scheduler_warmup, num_training_steps=total_steps)
-    rows = []
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
+    start_epoch, rows = load_ckpt(CKPT_PATH, model, optimizer, scheduler, device)
 
 
-    for epoch in range(cfg.num_epochs):
+    for epoch in range(start_epoch, cfg.num_epochs):
+        start = time.time()
+        print("="*15 + f"EPOCH {epoch}" + "="*15)
         train_output = run_epoch(
             train_loader, 
             model, 
@@ -174,10 +197,14 @@ def train():
             **{f"val_ap_{i}": map_res[i] for i in range(cfg.num_classes)},
             "label_map": [k for k, _ in class_maps.items()]
         }
+        end = time.time()
+
+        print("="*5 + f"Walltime: {end - start}"+ "="*3 + f"Mean precision = {map_res['mean']}" + "="*5)
 
         rows.append(row)
         os.makedirs("./runs", exist_ok=True)
         pl.DataFrame(rows).write_parquet("./runs/train_logs.parquet")
+        save_ckpt(CKPT_PATH, epoch, model, optimizer, scheduler, rows)
     
 if __name__ == "__main__":
     train()

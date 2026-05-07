@@ -34,6 +34,13 @@ class LocalDataset(Dataset):
         start_time, end_time = self.get_start(metadata, idx)
         audio_data = decoder.get_samples_played_in_range(start_time, end_time).data
         audio_data = audio_data[0]
+        target_samples = int(self.params['clipDur'] * self.params['outSR'])
+        if audio_data.shape[-1] < target_samples:
+            pad = target_samples - audio_data.shape[-1]
+            audio_data = torch.nn.functional.pad(audio_data, (0, pad))
+        elif audio_data.shape[-1] > target_samples:
+            audio_data = audio_data[..., :target_samples]
+
         label = torch.tensor(self.label_map[self.labels[idx]], dtype=torch.long)
         return audio_data, label
         

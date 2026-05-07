@@ -63,8 +63,7 @@ class Torca(nn.Module):
     def __init__(self, cfg, class_weights):
         super().__init__()
         self.grid_freq = int(cfg.num_mel_bins // cfg.patch_size)
-        # self.grid_time = int((cfg.chunk_duration * 1000) / cfg.time_step // cfg.patch_size)
-        self.grid_time = 12
+        self.grid_time = int((cfg.chunk_duration * 1000) / cfg.time_step // cfg.patch_size)
         self.seq_len = self.grid_freq * self.grid_time
         self.mask_prob = cfg.mask_prob
         self.span_len = cfg.span_len
@@ -83,7 +82,10 @@ class Torca(nn.Module):
     
     def forward(self, x, labels=None, padding_mask=None):
         indices, patch_mask = self.quant(x, padding_mask) 
+        print(f"Padding mask sanity: \n {patch_mask.float().mean()}")
+        print(f"Unique indices: \n {indices.unique().numel()}")
         h = self.emb(indices.long())
+        print(f"Pre-classifier features: \n {h.mean(dim=1).std(dim=0)}")
         batch_size = x.size(0)
         tgt = indices.clone().long()
         masks = torch.stack([make_mask(seq_len=self.seq_len, grid_freq=self.grid_freq, obj_masked=self.mask_prob, span=self.span_len)for _ in range(batch_size)]).to(h.device)
@@ -91,6 +93,8 @@ class Torca(nn.Module):
         for layer in self.trans:
             h = layer(h, padding_mask=patch_mask)
         clas_logits = self.classif_head(h.mean(dim=1)) # for classification aggregate the prediction for all patches
+        
+        print(f"Logits spread: \n {clas_logits.std(dim=0).mean()}")
         mask_logits = self.masked_head(h)
         mask_loss = F.cross_entropy(mask_logits[masks], tgt[masks])
         clas_loss = F.cross_entropy(clas_logits, labels, weight=self.class_weights)
