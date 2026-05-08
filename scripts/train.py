@@ -23,7 +23,7 @@ def make_model(cfg, class_weights):
     for p in model.parameters():
         if p.dim() > 1:
             torch.nn.init.xavier_uniform_(p)
-    nn.init.normal_(model.quant.proj.weight, std=1)
+    nn.init.normal_(model.quant.proj.weight, std=0.7)
     nn.init.zeros_(model.quant.proj.bias)
     return model
 
@@ -106,7 +106,8 @@ def run_epoch(data_iter,
         p = counts / counts.sum()
         entropy = -(p * (p + 1e-9).log()).sum()
         diversity_loss = -entropy   # maximize entropy
-        summed_loss = mask_loss + clas_loss * class_loss_weight + TorcaConfig.diversity_loss_weight * diversity_loss
+        #and we turn off the mask loss
+        summed_loss = 0*mask_loss + clas_loss * class_loss_weight + 0*TorcaConfig.diversity_loss_weight * diversity_loss
         
         summed_loss =  mask_loss + class_loss_weight * clas_loss
         total_summed_loss += summed_loss.item()
@@ -157,9 +158,14 @@ def train():
     val_loader = DataLoader(val_dataset, 5, shuffle=False, collate_fn=collate_fn)
     cfg = TorcaConfig()
     model = make_model(cfg, class_weights)
+    #let's freeze quantization params and just train the classifier.
+    for p in model.quant.proj.parameters():
+        p.requires_grad_(False)
+    for p in model.emb.parameters():
+        p.requires_grad_(False)
     class_weights = torch.from_numpy(get_class_coefs(train_dataset)).float()
 
-    optimizer = AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.98), eps=1e-9)
+    optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=3e-4, betas=(0.9, 0.98), eps=1e-9)
     class_loss_weight = cfg.class_loss_weight
     diversity_loss_weight = cfg.diversity_loss_weight
     total_steps = cfg.num_epochs * len(train_loader)

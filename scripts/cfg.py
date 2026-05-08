@@ -19,14 +19,14 @@ class TorcaConfig:
     fsq_levels: list = (8, 6, 6)
 
     # masking
-    mask_prob: float = 0.15
+    mask_prob: float = 0.4
     span_len: int = 3
 
     # training
     lr: float = 1e-4
     batch_size: int = 32
     num_epochs: int = 100
-    class_loss_weight: float = 1.0
+    class_loss_weight: float = 1
     diversity_loss_weight: float = 0.1
 
     # paths
