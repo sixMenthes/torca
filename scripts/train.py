@@ -39,7 +39,7 @@ def calc_MAP(y, y_pred):
     average_precision["mean"] = running_total / n_classes
     return average_precision
 
-CKPT_PATH = "./runs/ckpt.pt"
+CKPT_PATH = "./runs/curriculum_ckpt.pt"
 
 def save_ckpt(path, epoch, model, optimizer, scheduler, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -58,9 +58,10 @@ def load_ckpt(path, model, optimizer, scheduler, device):
         return 0, []
     ckpt = torch.load(path, map_location=device)
     model.load_state_dict(ckpt["model"])
-    optimizer.load_state_dict(ckpt["optimizer"])
-    scheduler.load_state_dict(ckpt["scheduler"])
-    return ckpt["epoch"] + 1, ckpt["rows"]   # resume from next epoch
+    #optimizer.load_state_dict(ckpt["optimizer"])
+    #scheduler.load_state_dict(ckpt["scheduler"])
+    #return ckpt["epoch"] + 1, ckpt["rows"]   # resume from next epoch
+    #return 0, ckpt["rows"]   # resume from next epoch
 
 
 class TrainState:
