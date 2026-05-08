@@ -176,7 +176,8 @@ def train():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
-    model.load_state_dict(CKPT_LOAD_PATH)
+    ckpt = torch.load(CKPT_LOAD_PATH, map_location=device)
+    model.load_state_dict(ckpt["model"])
     rows = []
     #start_epoch, rows = load_ckpt(CKPT_LOAD_PATH, model, optimizer, scheduler, device)
 
