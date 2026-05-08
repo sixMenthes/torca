@@ -39,7 +39,8 @@ def calc_MAP(y, y_pred):
     average_precision["mean"] = running_total / n_classes
     return average_precision
 
-CKPT_PATH = "./runs/curriculum_ckpt.pt"
+CKPT_LOAD_PATH = "./runs/ckpt_100_toks.pt"
+CKPT_PATH = "./runs/ckpt.pt"
 
 def save_ckpt(path, epoch, model, optimizer, scheduler, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -175,7 +176,7 @@ def train():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
-    start_epoch, rows = load_ckpt(CKPT_PATH, model, optimizer, scheduler, device)
+    start_epoch, rows = load_ckpt(CKPT_LOAD_PATH, model, optimizer, scheduler, device)
 
 
     for epoch in range(start_epoch, cfg.num_epochs):
