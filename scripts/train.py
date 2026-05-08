@@ -176,10 +176,12 @@ def train():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device)
-    start_epoch, rows = load_ckpt(CKPT_LOAD_PATH, model, optimizer, scheduler, device)
+    model.load_state_dict(CKPT_LOAD_PATH)
+    rows = []
+    #start_epoch, rows = load_ckpt(CKPT_LOAD_PATH, model, optimizer, scheduler, device)
 
 
-    for epoch in range(start_epoch, cfg.num_epochs):
+    for epoch in range(cfg.num_epochs):
         start = time.time()
         print("="*15 + f"EPOCH {epoch}" + "="*15)
         train_output = run_epoch(
