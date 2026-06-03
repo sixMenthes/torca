@@ -1,6 +1,5 @@
 import polars as pl
 import gcsfs
-import soundfile as sf
 
 pl.Config.set_tbl_rows(-1) #max rows shown
 pl.Config.set_tbl_cols(-1) #max cols shown
@@ -135,38 +134,10 @@ def check_file_exists(file_path):
     files = set(gclient.find(root))
     return file_path in files
 
-def add_file_durations(df_clean):
-    # Each row is a slice; many slices share a file. Fetch duration once per
-    # unique resolved path by reading the audio header from GCS, then join.
-    gclient = GCL
-    paths = (
-        df_clean.filter(pl.col("NewFileOk"))
-        .select("NewPath")
-        .unique()
-        .to_series()
-        .to_list()
-    )
-    durations = {}
-    for p in paths:
-        try:
-            with gclient.open(p.removeprefix("gs://"), "rb") as f:
-                info = sf.info(f)
-            durations[p] = info.frames / info.samplerate
-        except Exception:
-            durations[p] = None
-
-    return df_clean.with_columns(
-        FileLen = pl.col("NewPath").replace_strict(
-            durations, default=None, return_dtype=pl.Float64
-        ),
-    )
-
-
 if __name__ == "__main__":
     df_clean = load_clean()
     df_clean, missing_counts, missing_ds = check_data_exists(df_clean)
     missing_ds.write_csv("./ds/missing_dclde.csv")
-    df_clean = add_file_durations(df_clean)
     df_clean.write_parquet("./ds/DCLDE_w_Buzzes.parquet")
 
 
