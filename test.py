@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 from torca_transforms import BaseTransform
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from torchcodec.decoders import AudioDecoder
-import lightning as L
+from tqdm import tqdm
 
 log = get_pylogger(__name__)
 
@@ -28,8 +28,9 @@ class TorcaDataset(Dataset):
         features = self.transform(wave.data)
         return features
 
-class TorcaTest(L.LightningDataModule):
+class TorcaTest:
     def __init__(self, dataset_config: DictConfig, transform_config:DictConfig):
+
         self.parquet_path = dataset_config.parquet_path
         self.columns = dataset_config.columns
         self.data_dir = dataset_config.dataset_dir
@@ -45,20 +46,20 @@ class TorcaTest(L.LightningDataModule):
         self.df = self.load_df()
 
     def run_test(self):
-        train_set = self.build_train_set()
-        train_set = train_set.filter(~pl.col("Dataset").is_in(self.val_hydros))
+        train_set = self.build_set("train")
         subsample = (
             train_set
                 .group_by("Dataset")
                 .map_groups(lambda g: g.sample(fraction=0.15, shuffle=True, seed=59))
         )
         self.download_set(subsample)
+        subsample.write_parquet(os.path.join(self.data_dir, "subsample.parquet"))
         sub_test = TorcaDataset(subsample, transform_config=self.transform_config)
         loader = DataLoader(sub_test, batch_size=32, num_workers=self.num_workers)
         n = 0
         sum_x = 0.0
         sum_x2 = 0.0
-        for batch in loader:
+        for batch in tqdm(loader, desc="calculating mean"):
             x = batch.float()
             n += x.numel()
             sum_x += x.sum().item()
@@ -69,15 +70,15 @@ class TorcaTest(L.LightningDataModule):
         
         with open(os.path.join(self.data_dir, "info.txt"), "w") as f:
             f.write(f"Mean:\t{mean}\nStd:\t{std}")
-        with open(os.path.join(self.data_dir, "failed.txt"), "w") as f:
-            f.write("\n".join(self.failed_files))
-        subsample.write_parquet(os.path.join(self.data_dir, "subsample.parquet"))
+        if self.failed_files:
+            with open(os.path.join(self.data_dir, "failed.txt"), "w") as f:
+                f.write("\n".join(self.failed_files))
         
 
     def download_file(self, row:pl.Series):
         gcs_path = row["GCSPath"]
-        starts = row["SampleBeginSec"]
-        ends = row["SampleEndSec"]
+        starts = row["new_start_time"]
+        ends = row["new_end_time"]
         paths = row["LocalPath"]
 
         to_do = [(s, e, p) for s, e, p in zip(starts, ends, paths) if not Path(p).exists()]
@@ -106,58 +107,62 @@ class TorcaTest(L.LightningDataModule):
     def download_set(self, df:pl.DataFrame):
         to_download = (df
                        .group_by('GCSPath', maintain_order=True)
-                       .agg("Soundfile", "SampleBeginSec", "SampleEndSec", "LocalPath"))
+                       .agg("Soundfile", "new_start_time", "new_end_time", "LocalPath"))
 
-        with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-            futures = [executor.submit(self.download_file, row) for row in to_download.iter_rows(named=True)]
-            for fut in as_completed(futures):
-                failed = fut.result()
-                if failed:
-                    self.failed_files.append(failed)
+        l = to_download.height
 
+        with tqdm(total=l, desc="Downloading files") as pbar:
+            with ThreadPoolExecutor(max_workers=32) as executor:
+                futures = [executor.submit(self.download_file, row) for row in to_download.iter_rows(named=True)]
+                for fut in as_completed(futures):
+                    failed = fut.result()
+                    if failed:
+                        self.failed_files.append(failed)
+                    pbar.update(1)
 
-    def build_test_set(self):
+    def build_set(self, split:str):
+
+        assert (split in {"test", "val", "train"}), "split must be one of train, val, test"
+
         duration = pl.col('SampleEndSec') - pl.col('SampleBeginSec')
         center_time = pl.col('SampleBeginSec') + (duration / 2.0)
         new_start_time = pl.max_horizontal(pl.lit(0), center_time - self.clip_duration/2.0)
         new_end_time = (new_start_time + self.clip_duration)
 
-        return self.df.filter(pl.col('Dataset').is_in(self.test_hydros)).with_columns(
-            duration.alias('true_duration'),
-            center_time.alias('center_time'),
-            new_start_time.alias('new_start_time'),
-            new_end_time.alias('new_end_time')
-        )
-
-
-    def build_train_set(self):
-        duration = pl.col('SampleEndSec') - pl.col('SampleBeginSec')
-        center_time = pl.col('SampleBeginSec') + (duration / 2.0)
-        new_start_time = pl.max_horizontal(pl.lit(0), center_time - self.clip_duration/2.0)
-        new_end_time = (new_start_time + self.clip_duration)
-    
-        pool = (self.df.filter( 
-                ~pl.col('Dataset').is_in(self.test_hydros),
-                ~pl.col('Dataset').is_in(self.low_sr_hydros))
+        df = (self.df
             .with_columns(
                 duration.alias('true_duration'),
                 center_time.alias('center_time'),
                 new_start_time.alias('new_start_time'),
                 new_end_time.alias('new_end_time')
-            ))
+                )
+            .drop(
+                pl.col("SampleBeginSec"),
+                pl.col("SampleEndSec"),
+                pl.col("SampleDuration"),
+                )
+            )
 
-        rest = pool.filter(~pl.col('Labels').is_in(self.class_to_balance.keys()))
+        if split == "test":
+            return df.filter(pl.col('Dataset').is_in(self.test_hydros))
+        elif split == "val":
+            return df.filter(pl.col('Dataset').is_in(self.val_hydros))
+        else: # I have to solve this
+            strat_samples = []
+            if self.class_to_balance:
+                pool = df.filter(
+                    ~pl.col("Dataset").is_in(self.test_hydros),
+                    ~pl.col("Dataset").is_in(self.low_sr_hydros),
+                    ~pl.col("Dataset").is_in(self.val_hydros)
+                )
 
-        srkw_time = self.df.filter(pl.col('Labels') == 'SRKW')['SampleDuration'].sum()
+                rest = pool.filter(~pl.col("Labels").is_in(self.class_to_balance.keys()))
+                srkw_time = df.filter(pl.col("Labels") == "SRKW")['true_duration'].sum()
+                for c, frac in self.class_to_balance.items():
+                    dur = srkw_time * frac
+                    strat_samples.append(stratified_sampling(c, dur, pool))
+            return pl.concat([rest, *strat_samples])
 
-        strat_samples = []
-        for c, frac in self.class_to_balance.items():
-            dur = srkw_time * frac
-            strat_samples.append(stratified_sampling(c, dur, pool))
-    
-        return pl.concat([rest, *strat_samples])
-
-    
 
     def load_df(self):
       stem = pl.col("Soundfile").str.replace(r"\.[^.]+$", "")
@@ -195,7 +200,7 @@ def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_dur
 
     pool = df.filter(pl.col('Labels') == label)
     duration_per_hydro = remaining_duration / pool['Dataset'].n_unique()
-    cumul_per_hydro = pl.col('SampleDuration').cum_sum().over('Dataset')
+    cumul_per_hydro = pl.col('true_duration').cum_sum().over('Dataset')
 
     new_samples = (pool
                    .sample(fraction=1.0, shuffle=True)

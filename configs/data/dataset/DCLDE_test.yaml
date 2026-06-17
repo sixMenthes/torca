@@ -4,7 +4,7 @@ dataset_dir: /mnt/data/DCLDE_birdmae
 
 name: DCLDE_test
 
-num_workers: 4
+num_workers: 14
 
 columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath']
 
