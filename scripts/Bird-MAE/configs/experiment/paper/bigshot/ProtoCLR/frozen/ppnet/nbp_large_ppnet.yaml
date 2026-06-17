@@ -1,0 +1,63 @@
+# @package _global_
+defaults:
+  - override /callbacks: default_ssl
+  - override /data/dataset: NBP
+  - override /data/loaders: audioset_balanced
+  - override /data/transform: audio_birdset # für waveforms, similar to melbank_birdset
+  - override /logger: mlflow
+  - override /module/network: protoCLR
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: binary_cross_entropy
+  - override /module/metric: birdset_collection
+  - override /paths: cluster
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: protoCLR
+
+train: true
+test: true
+
+logger:
+  experiment_name: full_nbp
+  run_name: protoCLR_frozen_nbp_ppnet_allshot_${seed}_${start_time}
+
+data:
+  dataset:
+    target_length: 96_000
+    save_to_disk: /scratch/birdset/NBP/NBP_processed_42_21ab4e5b0a2b5110_2b7131fbef72bd67_8c71368c0f26e2e8
+  loaders:
+    train:
+      num_workers: 24
+      batch_size: 128
+      shuffle: true
+      drop_last: true
+      
+
+
+trainer:
+  max_epochs: 30
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 1
+  gradient_clip_val: 0.1
+  precision: 16-mixed
+  num_sanity_val_steps: 0
+
+
+module:
+  network:
+    name: ProtoCLR-simclr-ppnet
+    freeze_backbone: true
+    ppnet:
+      num_prototypes: 20
+      focal_similarity: false
+  optimizer:
+    target:
+      lr: 4e-4
+      weight_decay: 3e-4
+
+    # extras:
+    #   layer_decay: 0.75
+    #   decay_type: right 

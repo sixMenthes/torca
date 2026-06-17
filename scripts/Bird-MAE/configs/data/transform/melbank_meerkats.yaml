@@ -1,0 +1,87 @@
+input:
+  type: fbank
+  htk_compat: true
+  sample_frequency: ${module.network.sampling_rate}
+  use_energy: false
+  window_type: hanning
+  num_mel_bins: 128
+  dither: 0.0
+  frame_shift: 10 
+
+# input:
+#   type: birdset
+#   n_fft: 1024
+#   hop_length: 320
+#   power: 2.0
+#   n_mels: 128
+#   sample_rate: ${module.network.sampling_rate}
+#   n_stft: 513
+
+mixup:
+  prob: 0.0 
+
+waveform_augmentations: 
+  mixup_wave:
+    _target_: birdset.datamodule.components.augmentations.MultilabelMix
+    p: 0.3
+    min_snr_in_db: 2.0
+    max_snr_in_db: 30.0
+    mix_target: union
+    max_samples: 3
+
+  background_noise:
+    _target_: birdset.datamodule.components.augmentations.AddBackgroundNoise
+    p: 0.0
+    min_snr_in_db: 3.0
+    max_snr_in_db: 30
+    sample_rate: ${module.network.sampling_rate}
+    target_rate: ${module.network.sampling_rate}
+    background_paths: ${paths.background_dir}
+
+  colored_noise:
+    _target_: torch_audiomentations.AddColoredNoise
+    p: 0.2
+    min_snr_in_db: 3.0
+    max_snr_in_db: 30
+    max_f_decay: 2
+    min_f_decay: -2
+  
+  gain: 
+    _target_: torch_audiomentations.Gain
+    p: 0.2
+    min_gain_in_db: -18
+    max_gain_in_db: 6
+
+spectrogram_augmentations:
+  frequency_masking:
+    _target_: torchvision.transforms.RandomApply
+    p: 0.3
+    transforms: # - _ --> list!
+      - _target_: torchaudio.transforms.FrequencyMasking
+        freq_mask_param: 50
+        iid_masks: True
+  time_masking:
+    _target_: torchvision.transforms.RandomApply
+    p: 0.3
+    transforms: # - _ --> list!
+      - _target_: torchaudio.transforms.TimeMasking
+        time_mask_param: 100 # change!!!!
+        iid_masks: True
+
+
+no_call_mixer: 
+  directory: ${paths.background_dir}
+  p: 0.0
+  sampling_rate: ${module.network.sampling_rate}
+  length: 5
+  
+# timem: 96
+# freqm: 24
+timem: 0
+freqm: 0
+# freqm: 48
+# timem: 192
+
+mask2d: false
+mask_t_prob: 0.0
+mask_f_prob: 0.0

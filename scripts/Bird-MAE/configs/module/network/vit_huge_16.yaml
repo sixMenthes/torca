@@ -1,0 +1,46 @@
+name: VIT
+norm_layer: nn.LayerNorm
+sampling_rate: 32_000
+img_size_x: ${data.dataset.target_length}
+img_size_y: 128
+patch_size: 16
+in_chans: 1
+embed_dim: 1280
+global_pool: True
+mlp_ratio: 4
+qkv_bias: True
+eps: 1e-6
+num_heads: 16
+depth: 32
+drop_path: 0.1
+num_classes: ${data.dataset.num_classes} 
+pos_trainable: False
+
+#pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_wave_huge/runs/XCL/AudioMAE/2025-01-05_145126/callback_checkpoints/AudioMAE_XCL_epoch=94.ckpt
+pretrained_weights_path: /home/lrauch/AudioMAE_huge_XCL_ep99.ckpt
+target_length: ${data.dataset.target_length}
+mask2d: ${data.transform.mask2d}
+mask_t_prob: ${data.transform.mask_t_prob}
+mask_f_prob: ${data.transform.mask_f_prob}
+freeze_backbone: false
+ema_update_rate: null
+mask_inference: null
+
+ppnet: 
+  num_prototypes: 315
+  channels_prototypes: 1280
+  h_prototypes: 1
+  w_prototypes: 1
+  num_classes: ${data.dataset.num_classes}
+  topk_k: 1
+  margin: null
+  init_weights: true
+  add_on_layers_type: upsample
+  incorrect_class_connection: null
+  correct_class_connection: 1.0
+  bias_last_layer: -2.0
+  non_negative_last_layer: true
+  embedded_spectrogram_height: null
+  last_layer_lr: 4e-4
+  prototype_lr: 0.04
+  focal_similarity: true

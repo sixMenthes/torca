@@ -1,0 +1,104 @@
+name: ProtoCLR-simclr
+num_classes: ${data.dataset.num_classes}
+proto_clr_weights_path: /mnt/work/bird2vec/data/ckpt/simclr.pth
+sampling_rate: 16_000
+freeze_backbone: false
+
+ppnet:
+  num_prototypes: 20
+  channels_prototypes: 384
+  h_prototypes: 1
+  w_prototypes: 1
+  num_classes: ${data.dataset.num_classes}
+  topk_k: 1
+  margin: null
+  init_weights: true
+  add_on_layers_type: upsample
+  incorrect_class_connection: null
+  correct_class_connection: 1.0
+  bias_last_layer: -2.0
+  non_negative_last_layer: true
+  embedded_spectrogram_height: null
+  last_layer_lr: 4e-4
+  prototype_lr: 0.04
+  focal_similarity: true
+
+model_spec_cfg:
+  INIT: trunc_norm
+  NUM_STAGES: 3
+  PATCH_SIZE:
+  - 7
+  - 3
+  - 3
+  PATCH_STRIDE:
+  - 4
+  - 2
+  - 2
+  PATCH_PADDING:
+  - 2
+  - 1
+  - 1
+  DIM_EMBED:
+  - 64
+  - 192
+  - 384
+  NUM_HEADS:
+  - 1
+  - 3
+  - 6
+  DEPTH:
+  - 1
+  - 2
+  - 10
+  MLP_RATIO:
+  - 4
+  - 4
+  - 4
+  ATTN_DROP_RATE:
+  - 0
+  - 0
+  - 0
+  DROP_RATE:
+  - 0
+  - 0
+  - 0
+  DROP_PATH_RATE:
+  - 0
+  - 0
+  - 0.1
+  QKV_BIAS:
+  - true
+  - true
+  - true
+  CLS_TOKEN:
+  - false
+  - false
+  - true
+  POS_EMBED:
+  - false
+  - false
+  - false
+  QKV_PROJ_METHOD:
+  - dw_bn
+  - dw_bn
+  - dw_bn
+  KERNEL_QKV:
+  - 3
+  - 3
+  - 3
+  PADDING_KV:
+  - 1
+  - 1
+  - 1
+  STRIDE_KV:
+  - 2
+  - 2
+  - 2
+  PADDING_Q:
+  - 1
+  - 1
+  - 1
+  STRIDE_Q:
+  - 1
+  - 1
+  - 1

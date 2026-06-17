@@ -1,0 +1,71 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: HSN
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_birdset
+  - override /logger: mlflow
+  - override /module/network: vit_large_16.yaml
+  #- override /module/network: vit_base_16.yaml
+  #- override /module/network: convnext.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: asymmetric_loss.yaml
+  #- override /module/loss: binary_cross_entropy.yaml
+  - override /module/metric: birdset_collection
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune_hsn"
+
+train: true
+test: true
+
+data:
+  loaders:
+    train: 
+      num_workers: 16
+      batch_size: 64
+      #batch_size: 20
+      shuffle: true
+      drop_last: true
+  dataset:
+   save_to_disk: /home/lrauch/projects/birdMAE/data/HSN/HSN_5shot_1
+
+seed: 1
+
+logger:
+  experiment_name: fewshot_hsn
+  run_name: 5shot_ppnet_hsn_${seed}_${start_time}
+
+    
+trainer:
+  max_epochs: 50
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 2
+  #gradient_clip_val: 0.1
+  gradient_clip_val: 2
+  precision: 16-mixed
+  num_sanity_val_steps: 0
+
+
+module:
+  optimizer:
+    target:
+      lr: 3e-4
+      weight_decay: 3e-4
+      
+    extras:
+      #layer_decay: 0.75
+      layer_decay: 0.75
+      #decay_type: inverse_normal
+      decay_type: null
+      
+  network:
+    ema_update_rate: null
+    name: VIT_ppnet
+    freeze_backbone: True
+    ppnet:
+      num_prototypes: 20
+      

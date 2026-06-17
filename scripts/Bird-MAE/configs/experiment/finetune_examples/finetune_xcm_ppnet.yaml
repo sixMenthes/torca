@@ -1,0 +1,79 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: XCM
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_birdset
+  - override /logger: mlflow
+  - override /module/network: vit_large_16.yaml
+  #- override /module/network: vit_base_16.yaml
+  #- override /module/network: convnext.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: asymmetric_loss.yaml
+  - override /module/metric: birdset_collection
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune_xcm"
+
+train: true
+test: false
+
+logger:
+  experiment_name: finetune_xcm_ppnet
+
+data:
+  loaders:
+    train: 
+      num_workers: 16
+      batch_size: 48
+      shuffle: true
+      drop_last: true
+  dataset:
+    columns: ["filepath", "labels", "detected_events", "start_time", "end_time"]
+    test_in_val: false
+    saved_images: null
+    
+trainer:
+  max_epochs: 20
+  limit_val_batches: 0.0
+  check_val_every_n_epoch: 2
+  gradient_clip_val: 2
+  precision: 16-mixed
+  num_sanity_val_steps: 0
+  enable_checkpointing: true
+
+module:
+  optimizer:
+    target:
+      #lr: 5e-5
+      #lr: 3e-4
+      #lr: 1e-3
+      #lr: 3e-4
+      #lr: 3e-3
+      lr: 3e-4
+      #lr: 5e-4
+      #lr: 1e-4S
+      #weight_decay: 3e-2
+      weight_decay: 3e-3
+    extras:
+      layer_decay: 0.75
+      decay_type: inverse_normal
+  network:
+    ema_update_rate: null
+    name: VIT_ppnet
+    ppnet:
+      num_prototypes: 4110
+
+callbacks:
+  model_checkpoint:
+    dirpath: ${paths.output_dir}/callback_checkpoints
+    filename: ${module.network.name}_${data.dataset.name}_{epoch:02d}
+    save_last: true
+    save_weights_only: false
+    every_n_epochs: 2
+    save_top_k: -1
+    save_on_train_epoch_end: true

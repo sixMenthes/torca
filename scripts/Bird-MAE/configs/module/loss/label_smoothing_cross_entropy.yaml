@@ -1,0 +1,2 @@
+_target_: timm.loss.LabelSmoothingCrossEntropy
+smoothing: 0.1

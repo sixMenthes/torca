@@ -1,0 +1,23 @@
+input:
+  type: fbank
+  htk_compat: true
+  sample_frequency: ${module.network.sampling_rate}
+  use_energy: false
+  window_type: hanning
+  num_mel_bins: 128
+  dither: 0.0
+  frame_shift: 10 
+
+mixup:
+  alpha: 0
+  prob: 0
+  num_mix: 0
+  full_target: false
+  
+freqm: null
+timem: null
+# freqm: null
+# timem: null
+mask2d: false
+mask_t_prob: 0.2
+mask_f_prob: 0.2

@@ -1,0 +1,8 @@
+name: ConvNext
+num_channels: 1
+num_classes: ${data.dataset.num_classes}
+#hf_checkpoint: "DBD-research-group/ConvNeXT-Base-BirdSet-XCL"
+hf_checkpoint: null
+model_dir: ${paths.model_dir}
+sampling_rate: 32_000
+freeze_backbone: false

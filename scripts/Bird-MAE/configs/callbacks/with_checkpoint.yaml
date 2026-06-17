@@ -1,0 +1,5 @@
+defaults:
+  - _self_
+  - rich_progress_bar
+  - lr_monitor
+  - model_checkpoint

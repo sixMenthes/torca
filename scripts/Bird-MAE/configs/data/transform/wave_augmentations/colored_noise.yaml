@@ -1,0 +1,6 @@
+_target_: torch_audiomentations.AddColoredNoise
+  p: 0.2
+  min_snr_in_db: 5.0
+  max_snr_in_db: 20.0
+  max_f_decay: 0
+  min_f_decay: -2

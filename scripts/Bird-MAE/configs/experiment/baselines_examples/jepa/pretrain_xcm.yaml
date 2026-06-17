@@ -1,0 +1,68 @@
+# @package _global_
+defaults:
+  - override /callbacks: default_ssl
+  - override /data/dataset: XCM
+  - override /data/loaders: audioset_balanced
+  - override /data/transform: pretrain_melbank_birdset_jepa
+  - override /logger: mlflow
+  - override /module/network: jepa_vitbase_14
+  - override /module/optimizer: jepa
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: pretrain_xcm_jepa # improve this
+
+data:
+  loaders:
+    train: 
+      num_workers: 16
+      batch_size: 32
+      shuffle: true
+  dataset:
+    test_in_val: false
+  transform:
+    waveform_augmentations: 
+      mixup_wave:
+        p: 0.0
+    mask_configs:
+      patch_size: 14
+
+
+logger:
+  experiment_name: ${task_name}
+
+trainer:
+  max_epochs: 100
+  limit_val_batches: 0.0
+  check_val_every_n_epoch: 1
+  enable_checkpointing: true
+  precision: 16-mixed
+  gradient_clip_val: 1.0
+
+module:
+  optimizer:
+    target:
+      lr: 1e-3
+      weight_decay: 4e-2
+    extras:
+      layer_decay: 0.0
+  network:
+    sampling_rate: 32_000 
+
+callbacks:
+  model_checkpoint:
+    dirpath: ${paths.output_dir}/callback_checkpoints
+    filename: ${module.network.name}_${data.dataset.name}_{epoch:02d}
+    save_last: true
+    save_weights_only: false
+    every_n_epochs: 5
+    save_top_k: -1
+    save_on_train_epoch_end: true
+
+  progress_bar:
+    refresh_rate: 1
+
+
+

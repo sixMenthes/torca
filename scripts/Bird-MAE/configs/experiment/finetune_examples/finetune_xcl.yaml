@@ -1,0 +1,79 @@
+# @package _global_
+defaults:
+  - override /callbacks: default_ssl
+  - override /data/dataset: XCL
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_birdset
+  - override /logger: mlflow
+  - override /module/network: vit_large_16.yaml
+  #- override /module/network: convnext.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: binary_cross_entropy
+  - override /module/metric: birdset_collection
+  - override /paths: cluster
+  - override /trainer: multi_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune_xcl"
+
+train: true
+test: false
+
+logger:
+  experiment_name: finetune_xcl
+
+data:
+  loaders:
+    train: 
+      num_workers: 24
+      batch_size: 64
+      shuffle: true
+
+  dataset: 
+    saved_images: null
+    #save_to_disk: /scratch/birdset/XCL/XCL_processed_ogg
+    save_to_disk: /scratch/birdset/XCL/XCL_processed_500_1events_ogg_withlabels
+    test_in_val: false
+    columns: ["filepath", "labels", "detected_events", "start_time", "end_time"]
+
+    
+trainer:
+  max_epochs: 5
+  limit_val_batches: 0.0 # no val
+  gradient_clip_val: 2
+  precision: 16-mixed
+  #strategy: auto
+  strategy: ddp_find_unused_parameters_true
+  enable_checkpointing: true
+  
+
+module:
+  network:
+    pretrained_weights_path: /home/lrauch/AudioMAE_XCL_epoch=99_mixup_l.ckpt
+  optimizer:
+    target:
+      #lr: 5e-5
+      #lr: 3e-4
+      #lr: 1e-3
+      #lr: 3e-4
+      #lr: 3e-3
+      lr: 1e-4
+      #lr: 5e-4
+      #lr: 1e-4S
+      #weight_decay: 3e-2
+      weight_decay: 3e-3
+    extras:
+      layer_decay: 0.75
+      decay_type: inverse_normal
+
+callbacks:
+  model_checkpoint:
+    dirpath: ${paths.output_dir}/callback_checkpoints
+    filename: ${module.network.name}_${data.dataset.name}_{epoch:02d}
+    save_last: true
+    save_weights_only: false
+    every_n_epochs: 1
+    save_top_k: -1
+    save_on_train_epoch_end: true

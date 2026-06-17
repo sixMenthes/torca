@@ -1,0 +1,77 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: meerKAT
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_meerkats
+  - override /logger: mlflow
+  #- override /module/network: vit_large_16.yaml
+  - override /module/network: vit_base_16.yaml
+  #- override /module/network: convnext.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: asymmetric_poly_loss.yaml
+  #- override /module/loss: binary_cross_entropy.yaml
+  - override /module/metric: birdset_collection
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "meerkat"
+
+train: true
+test: true
+
+logger:
+  experiment_name: meerkat
+
+data:
+  loaders:
+    train: 
+      num_workers: 16
+      batch_size: 128
+      #batch_size: 20
+      shuffle: true
+      drop_last: true
+  # dataset:
+  #   save_to_disk: /home/lrauch/meerKat/cache/MeerKat_prepared_50_32k
+
+    
+trainer:
+  max_epochs: 30
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 1
+  #gradient_clip_val: 0.1
+  gradient_clip_val: 2
+  precision: 16-mixed
+  num_sanity_val_steps: 0
+
+
+module:
+  optimizer:
+    target:
+      #lr: 5e-5
+      lr: 4e-4
+      #lr: 5e-4
+      #lr: 1e-4
+      #weight_decay: 3e-2
+      weight_decay: 3e-4
+      
+    extras:
+      #layer_decay: 0.75
+      layer_decay: 0.75
+      #decay_type: inverse_normal
+      decay_type: right
+  
+      
+  network:
+    ema_update_rate: null
+    name: VIT_ppnet
+    freeze_backbone: True
+    sampling_rate: 16_000
+    ppnet:
+      num_prototypes: 20
+      last_layer_lr: 0.003
+      prototype_lr: 0.04
+      

@@ -1,0 +1,2 @@
+_target_: birdset.modules.metrics.multilabel.TopKAccuracy
+topk: 1

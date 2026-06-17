@@ -1,0 +1,14 @@
+.venv/
+.DS_Store
+__pycache__/
+models/*
+ds/
+scripts/runs/
+!models/.gitkeep
+*.safetensors
+*.notes
+*.csv
+*.parquet
+*.ipynb
+.hf_birdmae_venv/
+scripts/foundation_model/

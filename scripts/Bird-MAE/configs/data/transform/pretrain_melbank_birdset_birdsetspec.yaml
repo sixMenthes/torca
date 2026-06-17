@@ -1,0 +1,45 @@
+# input:
+#   type: fbank
+#   htk_compat: true
+#   sample_frequency: ${module.network.sampling_rate}
+#   use_energy: false
+#   window_type: hanning
+#   num_mel_bins: 128
+#   dither: 0.0
+#   frame_shift: 10 
+  
+input:
+  type: birdset
+  n_fft: 1024
+  hop_length: 320
+  power: 2.0
+  n_mels: 128
+  sample_rate: ${module.network.sampling_rate}
+  n_stft: 513
+
+mixup:
+  prob: 0.0 
+
+waveform_augmentations: 
+  mixup_wave:
+    _target_: birdset.datamodule.components.augmentations.MultilabelMix
+    p: 0.5
+    min_snr_in_db: 5.0
+    max_snr_in_db: 25.0
+    mix_target: union
+    max_samples: 3
+
+
+no_call_mixer: null
+  
+freqm: 0
+timem: 0
+
+# freqm: 48
+# timem: 192
+
+mask2d: false
+mask_t_prob: 0.0
+mask_f_prob: 0.0
+
+pretrain: true

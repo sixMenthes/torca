@@ -1,0 +1,15 @@
+train: 
+  num_workers: 8
+  batch_size: 64
+  shuffle: true
+  drop_last: true
+
+val:
+  num_workers: 8
+  batch_size: 64
+  shuffle: false
+
+test:
+  num_workers: 4
+  batch_size: 48
+  shuffle: false

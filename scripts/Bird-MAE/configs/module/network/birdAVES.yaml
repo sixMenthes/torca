@@ -1,0 +1,62 @@
+name: BirdAVES-large
+num_classes: ${data.dataset.num_classes}
+birdaves_weights_path: /mnt/work/bird2vec/data/ckpt/birdaves-bioxn-large.torchaudio.pt
+sampling_rate: 16_000
+freeze_backbone: false
+
+ppnet:
+  num_prototypes: 315
+  channels_prototypes: 1024
+  h_prototypes: 1
+  w_prototypes: 1
+  num_classes: ${data.dataset.num_classes}
+  topk_k: 1
+  margin: null
+  init_weights: true
+  add_on_layers_type: upsample
+  incorrect_class_connection: null
+  correct_class_connection: 1.0
+  bias_last_layer: -2.0
+  non_negative_last_layer: true
+  embedded_spectrogram_height: null
+  last_layer_lr: 4e-4
+  prototype_lr: 0.04
+  focal_similarity: false # true seems to be not working
+
+birdaves_cfg:
+  extractor_mode: group_norm
+  extractor_conv_layer_config:
+  - - 512
+    - 10
+    - 5
+  - - 512
+    - 3
+    - 2
+  - - 512
+    - 3
+    - 2
+  - - 512
+    - 3
+    - 2
+  - - 512
+    - 3
+    - 2
+  - - 512
+    - 2
+    - 2
+  - - 512
+    - 2
+    - 2
+  extractor_conv_bias: false
+  encoder_embed_dim: 1024
+  encoder_projection_dropout: 0.1
+  encoder_pos_conv_kernel: 128
+  encoder_pos_conv_groups: 16
+  encoder_num_layers: 24
+  encoder_num_heads: 16
+  encoder_attention_dropout: 0.1
+  encoder_ff_interm_features: 4096
+  encoder_ff_interm_dropout: 0
+  encoder_dropout: 0.1
+  encoder_layer_norm_first: false
+  encoder_layer_drop: 0.05

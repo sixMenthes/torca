@@ -1,0 +1,42 @@
+name: VIT
+norm_layer: nn.LayerNorm
+sampling_rate: 32_000
+img_size_x: 512
+img_size_y: 128
+patch_size: 16
+in_chans: 1
+embed_dim: 1024
+global_pool: True
+mlp_ratio: 4
+qkv_bias: True
+eps: 1e-6
+num_heads: 16
+depth: 24
+drop_path: 0.1
+num_classes: 21
+pos_trainable: False
+pretrained_weights_path: path
+target_length: 512
+freeze_backbone: false
+ema_update_rate: null
+mask_inference: null
+
+ppnet: 
+  num_prototypes: 20
+  channels_prototypes: 1024
+  h_prototypes: 1
+  w_prototypes: 1
+  num_classes: 21
+  topk_k: 1 # fix 
+  margin: null # kann raus, ändert nichts wirklich
+  init_weights: true
+  bias_last_layer: -2.0
+  add_on_layers_type: upsample # kann komplett raus 
+  incorrect_class_connection: null # sind abgestellt, keine incorrect connections, kann performance schon verschlechtern
+  correct_class_connection: 1.0 # gewichte protoypen in logreg
+  non_negative_last_layer: true # damit nicht lernbar bzw. nciht negativ werden können, verinder nvon negative reasoning, damit es nicht die klasse ist
+  embedded_spectrogram_height: null # kann weg, hat nicht wirklich was gebracht
+  last_layer_lr: 4e-4
+  prototype_lr: 0.04
+  focal_similarity: true #
+

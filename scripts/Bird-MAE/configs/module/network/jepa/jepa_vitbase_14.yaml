@@ -1,0 +1,36 @@
+name: A_JEPA
+sampling_rate: 32_000
+
+encoder:
+  img_size: 
+    - 128
+    - 512
+  patch_size: ${data.transform.mask_configs.patch_size}
+  in_chans: 1
+  embed_dim: 768
+  depth: 12
+  num_heads: 12
+  mlp_ratio: 4
+  qkv_bias: true
+  qk_scale: null
+  drop_rate: 0.0
+  attn_drop_rate: 0.0
+  drop_path_rate: 0.0
+  init_std: 0.02
+  ema: 
+    - 0.996
+    - 1.0
+  ipe_scale: 1.0
+
+predictor:
+  predictor_embed_dim: 384
+  depth: 6
+  mlp_ratio: 4.0
+  qkv_bias: true
+  qk_scale: null
+  drop_rate: 0.0
+  attn_drop_rate: 0.0
+  drop_path_rate: 0.0
+  init_std: 0.02
+
+

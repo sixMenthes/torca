@@ -1,0 +1,45 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: esc50
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_esc
+  - override /logger: mlflow
+  - override /module/network: vit_base_16
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: cross_entropy
+  - override /module/metric: accuracy
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune_esc50"
+
+train: true
+test: false
+
+data:
+  loaders:
+    train: 
+      num_workers: 8
+      batch_size: 64
+      shuffle: true
+
+trainer:
+  max_epochs: 100
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 2
+
+
+logger:
+  experiment_name: check_asbpre
+
+
+module:
+  optimizer:
+    target:
+      lr: 2e-3
+    extras:
+      layer_decay: null

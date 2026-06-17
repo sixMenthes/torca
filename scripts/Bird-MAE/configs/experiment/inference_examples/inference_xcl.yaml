@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: HSN
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_birdset
+  - override /logger: mlflow
+  - override /module/network: vit_large_16.yaml
+  #- override /module/network: vit_base_16.yaml
+  #- override /module/network: convnext.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: binary_cross_entropy
+  - override /module/metric: birdset_collection
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune_hsn"
+
+train: false
+test: true
+
+logger:
+  experiment_name: overnight_hsn
+
+module:
+  network:
+    mask_inference: ${data.dataset.hf_name}
+    pretrained_weights_path: /home/lrauch/VIT_XCL_epoch01_ft_from143556.ckpt

@@ -1,0 +1,27 @@
+mel_params: 
+  num_frequency_bins: 256
+  num_mel_filters: 128
+  min_frequency: 20.0
+  max_frequency: ${module.network.sampling_rate} # sampling_rate /2
+  norm: null
+  mel_scale: kaldi
+  triangularize_in_mel_space: True
+  sampling_rate: ${module.network.sampling_rate} # or dataset? 
+
+spectrogram_params:
+  frame_length: 400
+  hop_length: 160
+  fft_length: 512
+  power: 2.0
+  center: False
+  preemphasis: 0.97
+  log_mel: log
+  mel_floor: 1.192092955078125e-07
+  remove_dc_offset: True
+
+window_params: 
+  type: hann
+  periodic: False
+
+target_length: 1024
+

@@ -1,0 +1,26 @@
+# @package _global_
+defaults:
+  - _self_
+  - callbacks: default
+  - data/dataset: audioset_balanced
+  - data/loaders: audioset_balanced
+  - data/transform: melbank_as
+  - logger: mlflow
+  - hydra: workstation
+  - module/network: vit_base_16
+  - module/optimizer: adamw
+  - module/scheduler: cosine
+  - module/loss: binary_cross_entropy
+  - module/metric: map
+  - paths: workstation
+  - trainer: single_gpu
+  - experiment: null
+  
+seed: 42
+
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune"
+
+train: true
+test: true
+ 

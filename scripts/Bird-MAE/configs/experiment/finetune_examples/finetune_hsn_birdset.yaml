@@ -1,0 +1,53 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: HSN
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_birdset
+  - override /logger: mlflow
+  #- override /module/network: vit_base_16.yaml
+  - override /module/network: convnext.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: binary_cross_entropy
+  - override /module/metric: birdset_collection
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "finetune_hsn"
+
+train: true
+test: true
+
+logger:
+  experiment_name: convnext_hsn
+
+data:
+  loaders:
+    train: 
+      num_workers: 8
+      batch_size: 14
+      shuffle: true
+
+    
+trainer:
+  max_epochs: 30
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 2
+  gradient_clip_val: 0.1
+  precision: 16-mixed
+
+
+module:
+  network:
+    hf_checkpoint: "facebook/convnext-base-224-22k"
+  optimizer:
+    target:
+      lr: 5e-4
+      weight_decay: 5e-4
+    extras:
+      layer_decay: null
+      decay_type: right
+

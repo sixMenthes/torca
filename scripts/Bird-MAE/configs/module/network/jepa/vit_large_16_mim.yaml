@@ -1,0 +1,50 @@
+name: VIT_MIM
+norm_layer: nn.LayerNorm
+sampling_rate: 32_000
+img_size_x: ${data.dataset.target_length}
+img_size_y: 128
+patch_size: 16
+in_chans: 1
+embed_dim: 1024
+global_pool: True
+mlp_ratio: 4
+qkv_bias: True
+eps: 1e-6
+num_heads: 16
+depth: 24
+drop_path: 0.1
+num_classes: ${data.dataset.num_classes} 
+pos_trainable: False
+#retrained_weights_path: /home/lrauch/AudioMAE_XCL_epoch=99_mixup_l.ckpt
+pretrained_weights_path: /home/lrauch/AudioMAE_XCL_epoch150_213828.ckpt
+target_length: ${data.dataset.target_length}
+freeze_backbone: false
+
+mim:
+  proj_dim: 2048
+  out_dim: 256
+  pred_dim: 4096
+  queue_size: 3000
+  momentum: 0.9999
+  temperature: 0.2 
+
+
+ppnet: 
+  num_prototypes: 420
+  channels_prototypes: 1024
+  h_prototypes: 1
+  w_prototypes: 1
+  num_classes: ${data.dataset.num_classes}
+  topk_k: 1
+  margin: null
+  init_weights: true
+  add_on_layers_type: upsample
+  incorrect_class_connection: null
+  correct_class_connection: 1.0
+  bias_last_layer: -2.0
+  non_negative_last_layer: true
+  embedded_spectrogram_height: null
+  last_layer_lr: 4e-4
+  prototype_lr: 0.04
+  focal_similarity: true
+#2025-01-03_193352

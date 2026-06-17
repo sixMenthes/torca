@@ -1,0 +1,5 @@
+_target_: torchmetrics.AveragePrecision
+task: "multilabel"
+num_labels: ${data.dataset.num_classes}
+average: "macro"
+thresholds: null

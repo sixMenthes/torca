@@ -1,0 +1,11 @@
+input:
+  type: birdset
+  n_fft: 1024
+  hop_length: 320
+  power: 2.0
+  n_mels: 128
+  sample_rate: 32000
+  n_stft: 513
+
+freqm: 0
+timem: 0

@@ -1,0 +1,75 @@
+# @package _global_
+defaults:
+  - override /callbacks: default
+  - override /data/dataset: HSN
+  - override /data/loaders: esc50
+  - override /data/transform: melbank_birdset
+  - override /logger: mlflow
+  - override /module/network: vit_base_16_eat.yaml
+  - override /module/optimizer: adamw
+  - override /module/scheduler: cosine
+  - override /module/loss: asymmetric_loss
+  - override /module/metric: birdset_collection
+  - override /paths: workstation
+  - override /trainer: single_gpu
+
+seed: 42
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "overnight_hsn_base"
+
+train: true
+test: true
+
+logger:
+  experiment_name: ${task_name}
+
+data:
+  loaders:
+    train: 
+      num_workers: 24
+      batch_size: 64
+      #batch_size: 20
+      shuffle: true
+      drop_last: true
+
+    
+trainer:
+  max_epochs: 30
+  limit_val_batches: 1.0
+  check_val_every_n_epoch: 2
+  #gradient_clip_val: 0.1
+  gradient_clip_val: 2
+  precision: 16-mixed
+  num_sanity_val_steps: 0
+
+
+module:
+  optimizer:
+    target:
+      #lr: 5e-4
+      lr: 0.00005
+      #lr: 5e-4
+      #lr: 1e-4
+      #weight_decay: 3e-2
+      weight_decay: 3e-4
+      
+    extras:
+      layer_decay: 0.75
+      decay_type: right
+      
+  network:
+    freeze_backbone: false
+    global_pool: cls
+    #pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_eat_base/runs/XCL/EAT/2025-07-23_225933/callback_checkpoints/EAT_XCL_epoch=29.ckpt
+    #pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_eat_base/runs/XCL/EAT/2025-07-27_125911/callback_checkpoints/EAT_XCL_epoch=34.ckpt
+    #pretrained_weights_path: /home/lrauch/mnt_check/eat_base_xcl_var/runs/XCL/EAT/2025-08-03_105722/callback_checkpoints/EAT_XCL_epoch=39.ckpt # eat+var
+    #pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_eat_base/runs/XCL/EAT/2025-08-08_124305/callback_checkpoints/EAT_XCL_epoch=59.ckpt # eat+dino
+    #pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_eat_base/runs/XCL/EAT/2025-08-05_102803/callback_checkpoints/EAT_XCL_epoch=19.ckpt # eat+dino
+    pretrained_weights_path: /home/lrauch/mnt_check/eat_base_xcl_koleo/runs/XCL/EAT/2025-08-08_124319/callback_checkpoints/EAT_XCL_epoch=59.ckpt # var_patched_60
+    #pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_eat_base/runs/XCL/EAT/2025-07-27_105702/callback_checkpoints/EAT_XCL_epoch=59.ckpt # eat normal 60 epochs
+    #pretrained_weights_path: /home/lrauch/mnt_check/pretrain_xcl_eat_base/runs/XCL/EAT/2025-07-27_105702/callback_checkpoints/EAT_XCL_epoch=44.ckpt
+    ppnet_cfg: null
+      # last_layer_lr: ${module.optimizer.target.lr}
+      # prototype_lr: 0.04
+      # focal_similarity: true
+      # num_prototypes: 20

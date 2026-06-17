@@ -1,0 +1,13 @@
+root_dir: ${oc.env:PROJECT_ROOT}
+work_dir: ${hydra:runtime.cwd}
+
+#output
+output_dir: ${hydra:runtime.output_dir}
+
+dataset_dir: ${paths.root_dir}/data/${data.dataset.name}
+model_dir: ${paths.root_dir}/model_checkpoints/
+log_dir: ${paths.root_dir}/logs/
+background_dir: ${paths.root_dir}/data/background_noise/
+
+
+

@@ -1,0 +1,6 @@
+_target_: birdset.datamodule.components.augmentations.MultilabelMix
+p: 0.9
+min_snr_in_db: 5.0
+max_snr_in_db: 25.0
+mix_target: union
+max_samples: 2 
