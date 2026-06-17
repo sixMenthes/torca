@@ -32,17 +32,17 @@ class TorcaTest(L.LightningDataModule):
     def __init__(self, dataset_config: DictConfig, transform_config:DictConfig):
         self.parquet_path = dataset_config.parquet_path
         self.columns = dataset_config.columns
-        self.df = self.load_df()
+        self.data_dir = dataset_config.dataset_dir
         self.test_hydros = dataset_config.test_hydros
         self.low_sr_hydros = dataset_config.low_sr_hydros
         self.val_hydros = dataset_config.val_hydros
         self.class_to_balance = dataset_config.class_to_balance
-        self.data_dir = dataset_config.dataset_dir
         self.num_workers = dataset_config.num_workers
         self.gcl = gcsfs.core.GCSFileSystem(token='anon')
         self.transform_config = transform_config
         self.clip_duration = transform_config.clip_duration
         self.failed_files = []
+        self.df = self.load_df()
 
     def run_test(self):
         train_set = self.build_train_set()
