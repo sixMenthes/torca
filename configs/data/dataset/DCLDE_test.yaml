@@ -6,7 +6,7 @@ name: DCLDE_test
 
 num_workers: 14
 
-columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath']
+columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath', 'NewFileOk']
 
 test_hydros: ["StraitofGeorgia", "StrGeoS1"]
 

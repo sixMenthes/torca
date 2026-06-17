@@ -6,6 +6,26 @@ input:
   n_mels: 128
   sample_rate: 32000
   n_stft: 513
+  mean: ${data.dataset.mean}
+  std: ${data.dataset.std}
 
+clip_duration: ${data.dataset.clip_duration}
+target_length: 512
 freqm: 0
 timem: 0
+
+spectrogram_augmentations:
+  frequency_masking:
+    _target_: torchvision.transforms.RandomApply
+    p: 0.3
+    transforms: # - _ --> list!
+      - _target_: torchaudio.transforms.FrequencyMasking
+        freq_mask_param: 50
+        iid_masks: True
+  time_masking:
+    _target_: torchvision.transforms.RandomApply
+    p: 0.3
+    transforms: # - _ --> list!
+      - _target_: torchaudio.transforms.TimeMasking
+        time_mask_param: 100 # change!!!!
+        iid_masks: True

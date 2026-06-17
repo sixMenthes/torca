@@ -1,11 +1,16 @@
 train: 
-  num_workers: 4
-  batch_size: 48
+  num_workers: 1
+  #num_workers: 4
+  batch_size: 1
+  #batch_size: 48
   shuffle: true
+  drop_last: true
 
 val:
-  num_workers: 4
-  batch_size: 48
+  #num_workers: 4
+  num_workers: 1
+  #batch_size: 48
+  batch_size: 1
   shuffle: false
 
 test:
