@@ -1,6 +1,6 @@
 parquet_path: ./dataset/DCLDE_w_Buzzes.parquet
 
-dataset_dir: /mnt/data/DCLDE_birdmae
+dataset_dir: /data/DCLDE_birdmae
 
 name: DCLDE_test
 

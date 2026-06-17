@@ -3,6 +3,7 @@ import gcsfs
 import soundfile as sf
 from util.pylogger import get_pylogger
 import polars as pl
+import torch
 import os
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
@@ -12,6 +13,10 @@ from torchcodec.decoders import AudioDecoder
 from tqdm import tqdm
 
 log = get_pylogger(__name__)
+
+def collate_fn_skip(batch):
+    batch = [b for b in batch if b is not None]
+    return torch.utils.default_collate(batch) if batch else None
 
 class TorcaDataset(Dataset):
     def __init__(self, df:pl.DataFrame, transform_config:DictConfig):
@@ -24,9 +29,12 @@ class TorcaDataset(Dataset):
     def __getitem__(self, index):
         row = self.df.row(index, named=True)
         path = row["LocalPath"]
-        wave = AudioDecoder(path, sample_rate=32000).get_all_samples()
-        features = self.transform(wave.data)
-        return features
+        if os.path.exists(path):
+            wave = AudioDecoder(path, sample_rate=32000).get_all_samples()
+            features = self.transform(wave.data)
+            return features
+        else:
+            return None
 
 class TorcaTest:
     def __init__(self, dataset_config: DictConfig, transform_config:DictConfig):
@@ -52,10 +60,16 @@ class TorcaTest:
                 .group_by("Dataset")
                 .map_groups(lambda g: g.sample(fraction=0.15, shuffle=True, seed=59))
         )
-        self.download_set(subsample)
         subsample.write_parquet(os.path.join(self.data_dir, "subsample.parquet"))
+
+        self.download_set(subsample)
+
+        if self.failed_files:
+            with open(os.path.join(self.data_dir, "failed.txt"), "w") as f:
+                f.write("\n".join(self.failed_files))
+
         sub_test = TorcaDataset(subsample, transform_config=self.transform_config)
-        loader = DataLoader(sub_test, batch_size=32, num_workers=self.num_workers)
+        loader = DataLoader(sub_test, batch_size=32, num_workers=self.num_workers, collate_fn=collate_fn_skip)
         n = 0
         sum_x = 0.0
         sum_x2 = 0.0
@@ -70,9 +84,7 @@ class TorcaTest:
         
         with open(os.path.join(self.data_dir, "info.txt"), "w") as f:
             f.write(f"Mean:\t{mean}\nStd:\t{std}")
-        if self.failed_files:
-            with open(os.path.join(self.data_dir, "failed.txt"), "w") as f:
-                f.write("\n".join(self.failed_files))
+        
         
 
     def download_file(self, row:pl.Series):
