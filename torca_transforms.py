@@ -16,8 +16,8 @@ class BaseTransform:
 
         self.input_params = transform_params.input #spectrogram params
         self.sampling_rate = self.input_params.sample_rate
-        self.target_length = 512
-        self.clip_duration = 5.0
+        self.target_length = transform_params.target_length
+        self.clip_duration = transform_params.clip_duration
         self.max_length = int(int(self.sampling_rate) * self.clip_duration)
 
         self.spectrogram_conversion = Spectrogram(
@@ -97,12 +97,6 @@ class BaseTransform:
         return fbank_features
 
 
-
-if __name__ == "__main__":
-    my_conf = OmegaConf.load("/Users/leo/projects/orcas/torca/scripts/Bird-MAE/configs/data/transform/melbank_dclde.yaml")
-    path= "/Users/leo/projects/orcas/ds/try_birdmae.wav"
-    wave, sr = torchaudio.load_with_torchcodec(path)
-    my_transform = BaseTransform(my_conf)
 
 
 

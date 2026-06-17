@@ -9,13 +9,14 @@ from omegaconf import DictConfig, OmegaConf
 from torca_transforms import BaseTransform
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from torchcodec.decoders import AudioDecoder
+import lightning as L
 
 log = get_pylogger(__name__)
 
 class TorcaDataset(Dataset):
-    def __init__(self, df:pl.DataFrame, transform_configs:DictConfig):
+    def __init__(self, df:pl.DataFrame, transform_config:DictConfig):
         self.df = df
-        self.transform = BaseTransform(transform_configs) #no freqm nor timem
+        self.transform = BaseTransform(transform_config) #no freqm nor timem
 
     def __len__(self):
         return len(self.df)
@@ -27,19 +28,20 @@ class TorcaDataset(Dataset):
         features = self.transform(wave.data)
         return features
 
-class TorcaTest(Dataset):
-    def __init__(self, dataset_configs: DictConfig):
-        self.parquet_path = dataset_configs.parquet_path
-        self.columns = dataset_configs.columns
+class TorcaTest(L.LightningDataModule):
+    def __init__(self, dataset_config: DictConfig, transform_config:DictConfig):
+        self.parquet_path = dataset_config.parquet_path
+        self.columns = dataset_config.columns
         self.df = self.load_df()
-        self.clip_duration = dataset_configs.clip_duration
-        self.test_hydros = dataset_configs.test_hydros
-        self.low_sr_hydros = dataset_configs.low_sr_hydros
-        self.val_hydros = dataset_configs.val_hydros
-        self.class_to_balance = dataset_configs.class_to_balance
-        self.data_dir = dataset_configs.dataset_dir
-        self.num_workers = dataset_configs.num_workers
+        self.test_hydros = dataset_config.test_hydros
+        self.low_sr_hydros = dataset_config.low_sr_hydros
+        self.val_hydros = dataset_config.val_hydros
+        self.class_to_balance = dataset_config.class_to_balance
+        self.data_dir = dataset_config.dataset_dir
+        self.num_workers = dataset_config.num_workers
         self.gcl = gcsfs.core.GCSFileSystem(token='anon')
+        self.transform_config = transform_config
+        self.clip_duration = transform_config.clip_duration
         self.failed_files = []
 
     def run_test(self):
@@ -51,8 +53,8 @@ class TorcaTest(Dataset):
                 .map_groups(lambda g: g.sample(fraction=0.15, shuffle=True, seed=59))
         )
         self.download_set(subsample)
-        sub_test = TorcaDataset(subsample)
-        loader = DataLoader(sub_test)
+        sub_test = TorcaDataset(subsample, transform_config=self.transform_config)
+        loader = DataLoader(sub_test, batch_size=32, num_workers=self.num_workers)
         n = 0
         sum_x = 0.0
         sum_x2 = 0.0
@@ -205,3 +207,10 @@ def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_dur
         return df.clear()
 
     return pl.concat([new_samples, stratified_sampling(label, tgt_duration, df, curr_duration+added, seed=seed)])
+
+
+if __name__ == "__main__":
+    data_conf = OmegaConf.load("./configs/data/dataset/DCLDE_test.yaml")
+    trans_conf = OmegaConf.load("./configs/data/transform/melbank_dclde_test.yaml")
+    test = TorcaTest(dataset_config=data_conf, transform_config=trans_conf)
+    test.run_test()

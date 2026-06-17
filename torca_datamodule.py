@@ -239,9 +239,9 @@ def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_dur
 
 
 if __name__ == "__main__":
-    my_conf = OmegaConf.load("/Users/leo/projects/orcas/torca/scripts/Bird-MAE/configs/data/transform/melbank_dclde.yaml")
-    my_df = pl.read_parquet("/Users/leo/projects/orcas/torca/dataset/DCLDE_w_Buzzes.parquet")
-    my_df = my_df.with_columns(LocalPath = pl.lit("/Users/leo/projects/orcas/ds/try_birdmae.wav"))
+    my_conf = OmegaConf.load("./configs/data/transform/melbank_dclde.yaml")
+    my_df = pl.read_parquet("./dataset/DCLDE_w_Buzzes.parquet")
+    my_df = my_df.with_columns(LocalPath = pl.lit("../ds/try_birdmae.wav"))
     dataset = TorcaDataset(my_df, my_conf)
 
 
