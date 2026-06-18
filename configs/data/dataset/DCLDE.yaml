@@ -19,3 +19,5 @@ class_to_balance: {}
 mean: -42.456
 std: 15.718
 clip_duration: 5.0
+target_length: ${data.transform.target_length}
+num_classes: 8 #to review

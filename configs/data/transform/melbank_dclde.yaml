@@ -29,3 +29,7 @@ spectrogram_augmentations:
       - _target_: torchaudio.transforms.TimeMasking
         time_mask_param: 100 # change!!!!
         iid_masks: True
+
+mask2d: False
+mask_t_prob: 0.0
+mask_f_prob: 0.0

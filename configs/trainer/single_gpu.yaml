@@ -4,7 +4,7 @@ max_epochs: 60
 
 accelerator: gpu
 devices: 1
-enable_checkpointing: False
+enable_checkpointing: True
 enable_model_summary: False
 enable_progress_bar: True
 

@@ -1,6 +1,6 @@
 model_checkpoint:
   _target_: lightning.pytorch.callbacks.ModelCheckpoint
-  dirpath: ${paths.model_dir}
+  dirpath: ${paths.output_dir}/checkpoints
   filename: ${module.network.name}_${data.dataset.name}_{epoch:02d}
   save_last: true
   save_top_k: 0

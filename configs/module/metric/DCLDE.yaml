@@ -1,0 +1,16 @@
+defaults:
+  - multiclassAP.yaml
+
+additional:
+  AUC_per_class: 
+    _target_: torchmetrics.AveragePrecision
+    task: "multiclass"
+    num_classes: ${data.dataset.num_classes}
+    average: "none"
+    thresholds: null
+  PR_curve: 
+    _target_: torchmetrics.PrecisionRecallCurve
+    task: "multiclass"
+    num_classes: ${data.dataset.num_classes}
+    average: "macro"
+    thresholds: null

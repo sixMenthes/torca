@@ -11,12 +11,12 @@ defaults:
   - module/optimizer: adamw
   - module/scheduler: cosine
   - module/loss: asymmetric_loss
-  - module/metric: birdset_collection #change pls
+  - module/metric: DCLDE #change pls
   - paths: workstation
   - trainer: single_gpu
   - experiment: null
   
-seed: 42
+seed: 59
 
 start_time: ${now:%Y-%m-%d_%H%M%S}
 task_name: "finetune_torca"

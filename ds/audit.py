@@ -7,7 +7,7 @@ pl.Config.set_fmt_str_lengths(100)
 #pl.Config.set_tbl_rows(-1)
 
 
-PATH = "./ds/DCLDE_w_Buzzes.csv"
+PATH = "./dataset/DCLDE_w_Buzzes.csv"
 SCHEMA = {
     "Soundfile": pl.String,
     "Dataset": pl.String,
@@ -137,8 +137,8 @@ def check_file_exists(file_path):
 if __name__ == "__main__":
     df_clean = load_clean()
     df_clean, missing_counts, missing_ds = check_data_exists(df_clean)
-    missing_ds.write_csv("./ds/missing_dclde.csv")
-    df_clean.write_parquet("./ds/DCLDE_w_Buzzes.parquet")
+    missing_ds.write_csv("./dataset/missing_dclde.csv")
+    df_clean.write_parquet("./dataset/DCLDE_w_Buzzes.parquet")
 
 
 

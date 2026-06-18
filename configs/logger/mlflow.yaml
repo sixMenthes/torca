@@ -1,5 +1,5 @@
 _target_: pytorch_lightning.loggers.mlflow.MLFlowLogger
-experiment_name: "test"
+experiment_name: "Finetune with no pre-training"
 run_name: ${task_name}_${data.dataset.name}_${start_time}
 tracking_uri: ${paths.log_dir}/mlflow/mlruns # run `mlflow ui` command inside the `logs/mlflow/` dir to open the UI
 tags: null
