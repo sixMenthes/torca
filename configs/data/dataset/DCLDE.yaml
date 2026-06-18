@@ -1,4 +1,4 @@
-parquet_path: /home/tundra/projects/torca/ds/subsample.parquet
+parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
 
 dataset_dir: ${paths.dataset_dir}
 
@@ -20,4 +20,4 @@ mean: -42.456
 std: 15.718
 clip_duration: 5.0
 target_length: ${data.transform.target_length}
-num_classes: 6 #to review
+num_classes: 7 #to review

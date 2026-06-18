@@ -15,7 +15,7 @@ depth: 12
 drop_path: 0.1
 num_classes: ${data.dataset.num_classes} 
 pos_trainable: False
-pretrained_weights_path: /home/lrauch/AudioMAE_XCL_epoch=99_mixup.ckpt #change
+pretrained_weights_path: /home/tundra/projects/torca/pretrained/Bird-MAE-B
 target_length: ${data.dataset.target_length}
 mask2d: ${data.transform.mask2d}
 mask_t_prob: ${data.transform.mask_t_prob}

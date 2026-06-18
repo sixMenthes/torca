@@ -1,8 +1,0 @@
-[2026-06-18 06:35:01,870][__main__][INFO] - Seed everything with 59
-[2026-06-18 06:35:01,884][__main__][INFO] - Setup logger
-[2026-06-18 06:35:02,003][__main__][INFO] - Setup callbacks
-[2026-06-18 06:35:02,003][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.LearningRateMonitor>
-[2026-06-18 06:35:02,003][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.TQDMProgressBar>
-[2026-06-18 06:35:02,004][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
-[2026-06-18 06:35:02,005][__main__][INFO] - Setup trainer
-[2026-06-18 06:35:02,934][__main__][INFO] - Setup model

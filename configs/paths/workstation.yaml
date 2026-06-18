@@ -4,7 +4,7 @@ work_dir: ${hydra:runtime.cwd}
 #output
 output_dir: ${hydra:runtime.output_dir}
 
-dataset_dir: ${paths.root_dir}/data/
+dataset_dir: /data/
 model_dir: ${paths.output_dir}/checkpoints/
 log_dir: ${paths.root_dir}/logs/
 background_dir: ${paths.root_dir}/data/background_noise/
