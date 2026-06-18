@@ -250,9 +250,9 @@ def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_dur
 
 
 if __name__ == "__main__":
-    data_conf = OmegaConf.load("configs/data/dataset/DCLDE.yaml")
+    data_conf = OmegaConf.load("configs/data/dataset/DCLDE_test.yaml")
     loader_conf = OmegaConf.load("configs/data/loaders/default.yaml")
-    transform_conf = OmegaConf.load("/Users/leo/projects/orcas/torca/configs/data/transform/melbank_dclde.yaml")
+    transform_conf = OmegaConf.load("/Users/leo/projects/orcas/torca/configs/data/transform/melbank_dclde_test.yaml")
     module = TorcaDataModule(data_conf, loader_conf, transform_conf)
 
 

@@ -7,7 +7,7 @@ defaults:
   - data/transform: melbank_dclde
   - logger: mlflow
   - hydra: workstation
-  - module/network: vit_base_16
+  - module/network: vit_base_16_dclde
   - module/optimizer: adamw
   - module/scheduler: cosine
   - module/loss: asymmetric_loss

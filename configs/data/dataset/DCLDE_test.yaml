@@ -1,4 +1,4 @@
-parquet_path: ./dataset/DCLDE_w_Buzzes.parquet
+parquet_path: ./ds/DCLDE_w_Buzzes.parquet
 
 dataset_dir: /data/DCLDE_birdmae
 
@@ -14,4 +14,5 @@ val_hydros: ["CarmanahPt"]
 
 low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab',  'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
 
+clip_duration: 5.0
 class_to_balance: {"KW_und": 0,}
