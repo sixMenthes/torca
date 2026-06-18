@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-from torchcodec.decoders import AudioDecoder
+import soundfile as sf
 from util.pylogger import get_pylogger
 import torch.nn.functional as F
 import polars as pl
@@ -23,8 +23,9 @@ class TorcaDataset(Dataset):
         path = row["LocalPath"]
         if os.path.exists(path):
             label = self.label_map[row["Labels"]]
-            label = F.one_hot(torch.tensor(label))
-            wave = AudioDecoder(path, sample_rate=32000).get_all_samples()
+            label = F.one_hot(torch.tensor(label), num_classes = 6)
+            audio, sr = sf.read(path, dtype="float32", always_2d=True)
+            wave = torch.from_numpy(audio).T
             features = self.transform(wave.data)
             return {"audio": features, "label": label}
         else:

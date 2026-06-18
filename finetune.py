@@ -9,7 +9,6 @@ import pyrootutils
 from pathlib import Path 
 from torca_datamodule import TorcaDataModule
 
-from datamodule import HFDataModule, BirdSetDataModule
 from util.pylogger import get_pylogger
 from util.log_hparams import log_hyperparameters
 from build_model import instantiate_callbacks, build_model
@@ -26,7 +25,7 @@ root = pyrootutils.setup_root(
 _HYDRA_PARAMS = {
     "version_base": None,
     "config_path": str(root / "configs"),
-    "config_name": "finetune.yaml"
+    "config_name": "torca.yaml"
 }
 
 @hydra.main(**_HYDRA_PARAMS)
@@ -36,27 +35,13 @@ def finetune(cfg: DictConfig):
     #torch.set_num_threads(12)
     #print(OmegaConf.to_yaml(cfg))
     
-    if "birdset" in cfg.data.dataset.hf_path.lower(): # correct this later 
-        datamodule = BirdSetDataModule(
-            dataset_configs=cfg.data.dataset,
-            loader_configs=cfg.data.loaders,
-            transform_configs=cfg.data.transform,
-            sampling_rate=cfg.module.network.sampling_rate
-        )
 
-    elif "dclde" in cfg.data.dataset.name.lower():
+    if "dclde" in cfg.data.dataset.name.lower():
         datamodule = TorcaDataModule(
             dataset_configs=cfg.data.dataset,
             loader_configs=cfg.data.loaders,
             transform_configs=cfg.data.transform
         )
-    else:
-        datamodule = HFDataModule(
-            dataset_configs=cfg.data.dataset,
-            loader_configs=cfg.data.loaders,
-            transform_configs=cfg.data.transform,
-            sampling_rate=cfg.module.network.sampling_rate
-    )
 
     if sys.gettrace():
          log.info("Debugging mode, no logger")

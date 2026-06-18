@@ -1,4 +1,7 @@
 .venv/
+data/
+inspect_weights.py
+pretrained/
 .DS_Store
 __pycache__/
 models/*

@@ -1,0 +1,15 @@
+artifact_uri: /home/tundra/projects/torca/logs//mlflow/mlruns/584970600783353734/cebae2ad4f154135a65cd82c0fdc19ec/artifacts
+end_time: 1781764227100
+entry_point_name: ''
+experiment_id: '584970600783353734'
+lifecycle_stage: active
+run_id: cebae2ad4f154135a65cd82c0fdc19ec
+run_name: finetune_torca_DCLDE_no_balance_2026-06-18_082526
+run_uuid: cebae2ad4f154135a65cd82c0fdc19ec
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1781763928773
+status: 4
+tags: []
+user_id: tundra

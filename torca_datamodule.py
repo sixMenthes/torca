@@ -65,7 +65,7 @@ class TorcaDataModule(L.LightningDataModule):
     def setup(self, stage:str):
 
         self.num_classes = self.df["Labels"].n_unique()
-        self.label_map = dict(zip(self.df["Labels"].sort().to_list(), list(range(self.num_classes))))
+        self.label_map = dict(zip(self.df["Labels"].unique().sort().to_list(), list(range(self.num_classes))))
 
         if stage == "fit":
             train_transform = TrainTransform(self.transform_config)

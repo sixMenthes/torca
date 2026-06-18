@@ -1,0 +1,12 @@
+[2026-06-18 07:57:33,820][__main__][INFO] - Seed everything with 59
+[2026-06-18 07:57:33,835][__main__][INFO] - Setup logger
+[2026-06-18 07:57:33,953][__main__][INFO] - Setup callbacks
+[2026-06-18 07:57:33,953][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.LearningRateMonitor>
+[2026-06-18 07:57:33,953][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.TQDMProgressBar>
+[2026-06-18 07:57:33,954][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-06-18 07:57:33,955][__main__][INFO] - Setup trainer
+[2026-06-18 07:57:34,880][__main__][INFO] - Setup model
+[2026-06-18 07:57:35,669][__main__][INFO] - Load pretrained weights from /home/tundra/projects/torca/pretrained/Bird-MAE-B
+[2026-06-18 07:57:35,970][__main__][INFO] - Freezing backbone weights, only training head
+[2026-06-18 07:57:35,971][__main__][INFO] - Logging hyperparameters
+[2026-06-18 07:57:36,223][__main__][INFO] - Start training

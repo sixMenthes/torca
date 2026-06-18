@@ -1,0 +1,9 @@
+[2026-06-18 06:56:09,653][__main__][INFO] - Seed everything with 59
+[2026-06-18 06:56:09,667][__main__][INFO] - Setup logger
+[2026-06-18 06:56:09,786][__main__][INFO] - Setup callbacks
+[2026-06-18 06:56:09,787][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.LearningRateMonitor>
+[2026-06-18 06:56:09,787][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.TQDMProgressBar>
+[2026-06-18 06:56:09,787][build_model][INFO] - Instantiating callback <lightning.pytorch.callbacks.ModelCheckpoint>
+[2026-06-18 06:56:09,789][__main__][INFO] - Setup trainer
+[2026-06-18 06:56:10,718][__main__][INFO] - Setup model
+[2026-06-18 06:56:11,515][__main__][INFO] - Load pretrained weights from /home/lrauch/AudioMAE_XCL_epoch=99_mixup.ckpt
