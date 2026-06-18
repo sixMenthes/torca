@@ -6,7 +6,6 @@ inspect_weights.py
 pretrained/
 .DS_Store
 __pycache__/
-models/*
 ds/
 scripts/runs/
 !models/.gitkeep
