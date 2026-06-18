@@ -7,6 +7,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf, DictConfig
 import pyrootutils
 from pathlib import Path 
+from torca_datamodule import TorcaDataModule
 
 from datamodule import HFDataModule, BirdSetDataModule
 from util.pylogger import get_pylogger
@@ -41,6 +42,13 @@ def finetune(cfg: DictConfig):
             loader_configs=cfg.data.loaders,
             transform_configs=cfg.data.transform,
             sampling_rate=cfg.module.network.sampling_rate
+        )
+
+    elif "dclde" in cfg.data.dataset.name.lower():
+        datamodule = TorcaDataModule(
+            dataset_configs=cfg.data.dataset,
+            loader_configs=cfg.data.loaders,
+            transform_configs=cfg.data.transform
         )
     else:
         datamodule = HFDataModule(
