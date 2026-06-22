@@ -23,7 +23,8 @@ class TorcaDataset(Dataset):
         path = row["LocalPath"]
         if os.path.exists(path):
             label = self.label_map[row["Labels"]]
-            label = F.one_hot(torch.tensor(label), num_classes = 7)
+            num_classes = len(self.label_map.keys())
+            label = F.one_hot(torch.tensor(label), num_classes = num_classes)
             audio, sr = sf.read(path, dtype="float32", always_2d=True)
             wave = torch.from_numpy(audio).T
             features = self.transform(wave.data)
