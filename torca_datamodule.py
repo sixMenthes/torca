@@ -152,6 +152,7 @@ class TorcaDataModule(L.LightningDataModule):
     def build_set(self, split:str):
 
         assert (split in {"test", "val", "train"}), "split must be one of train, val or test"
+        #also i should assert that classes to balance is a subset of labels
         df = self.df.filter(pl.col('Labels').is_in(self.labels))
         
         if split == "test":
@@ -177,11 +178,12 @@ class TorcaDataModule(L.LightningDataModule):
                     dur = srkw_time * frac
                     strat_samples.append(stratified_sampling(c, dur, pool))
                 return pl.concat([rest, *strat_samples]).with_columns(pl.lit("train").alias("split"))
-            return self.df.filter(
-                    ~pl.col("Dataset").is_in(self.test_hydros),
-                    ~pl.col("Dataset").is_in(self.low_sr_hydros),
-                    ~pl.col("Dataset").is_in(self.val_hydros)
-            )
+            else:
+                return df.filter(
+                        ~pl.col("Dataset").is_in(self.test_hydros),
+                        ~pl.col("Dataset").is_in(self.low_sr_hydros),
+                        ~pl.col("Dataset").is_in(self.val_hydros)
+                )
 
     
 
