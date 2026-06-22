@@ -14,10 +14,12 @@ val_hydros: ["CarmanahPt"]
 
 low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab',  'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
 
+labels: ['Background', 'HW', 'SRKW', 'TKW']
+num_classes: 4 #to review
+
 class_to_balance: {}
 
 mean: -42.456
 std: 15.718
 clip_duration: 5.0
 target_length: ${data.transform.target_length}
-num_classes: 7 #to review

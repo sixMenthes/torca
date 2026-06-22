@@ -44,6 +44,7 @@ class TorcaDataModule(L.LightningDataModule):
         self.num_workers = dataset_configs.num_workers
         self.clip_duration = dataset_configs.clip_duration
         self.gcl = gcsfs.core.GCSFileSystem(token='anon')
+        self.labels = dataset_configs.labels
         self.num_classes = dataset_configs.num_classes
         self.failed_files = []
 
@@ -65,7 +66,7 @@ class TorcaDataModule(L.LightningDataModule):
 
     def setup(self, stage:str):
 
-        self.label_map = dict(zip(self.df["Labels"].unique().sort().to_list(), list(range(self.num_classes))))
+        self.label_map = dict(zip(self.labels, range(self.num_classes)))
 
         if stage == "fit":
             train_transform = TrainTransform(self.transform_config)
@@ -151,19 +152,20 @@ class TorcaDataModule(L.LightningDataModule):
     def build_set(self, split:str):
 
         assert (split in {"test", "val", "train"}), "split must be one of train, val or test"
-
+        df = self.df.filter(pl.col('Labels').is_in(self.labels))
+        
         if split == "test":
-            return (self.df
+            return (df
                     .filter(pl.col('Dataset').is_in(self.test_hydros))
                     .with_columns(pl.lit("test").alias("split")))
         elif split == "val":
-            return (self.df
+            return (df
                     .filter(pl.col('Dataset').is_in(self.val_hydros))
                     .with_columns(pl.lit("val").alias("split")))
         else: # I have to solve this
             strat_samples = []
             if self.class_to_balance:
-                pool = self.df.filter(
+                pool = df.filter(
                     ~pl.col("Dataset").is_in(self.test_hydros),
                     ~pl.col("Dataset").is_in(self.low_sr_hydros),
                     ~pl.col("Dataset").is_in(self.val_hydros)
