@@ -44,6 +44,7 @@ class TorcaDataModule(L.LightningDataModule):
         self.num_workers = dataset_configs.num_workers
         self.clip_duration = dataset_configs.clip_duration
         self.gcl = gcsfs.core.GCSFileSystem(token='anon')
+        self.num_classes = dataset_configs.num_classes
         self.failed_files = []
 
         self.df = self.load_df()
@@ -64,7 +65,6 @@ class TorcaDataModule(L.LightningDataModule):
 
     def setup(self, stage:str):
 
-        self.num_classes = self.df["Labels"].n_unique()
         self.label_map = dict(zip(self.df["Labels"].unique().sort().to_list(), list(range(self.num_classes))))
 
         if stage == "fit":
