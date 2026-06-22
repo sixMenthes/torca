@@ -8,9 +8,3 @@ additional:
     num_classes: ${data.dataset.num_classes}
     average: "none"
     thresholds: null
-  PR_curve: 
-    _target_: torchmetrics.PrecisionRecallCurve
-    task: "multiclass"
-    num_classes: ${data.dataset.num_classes}
-    average: "macro"
-    thresholds: null
