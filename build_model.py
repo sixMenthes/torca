@@ -18,7 +18,7 @@ def instantiate_callbacks(cfg_callbacks: DictConfig):
     return callbacks
 
 
-def build_model(cfg_module: DictConfig):
+def build_model(cfg_module: DictConfig, label_map: dict):
 
     if cfg_module.network.name == "VIT_ppnet":
         module = VIT_ppnet(
@@ -47,7 +47,8 @@ def build_model(cfg_module: DictConfig):
             mask_f_prob=cfg_module.network.mask_f_prob,
             ema_update_rate=cfg_module.network.ema_update_rate,
             ppnet_cfg=cfg_module.network.ppnet,
-            mask_inference=cfg_module.network.mask_inference
+            mask_inference=cfg_module.network.mask_inference,
+            label_map=label_map
         )
 
     elif cfg_module.network.name == "VIT":
@@ -77,29 +78,8 @@ def build_model(cfg_module: DictConfig):
             mask_f_prob=cfg_module.network.mask_f_prob,
             ema_update_rate=cfg_module.network.ema_update_rate,
             mask_inference=cfg_module.network.mask_inference,
+            label_map=label_map
           )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     else:
         raise ValueError(f"Model {cfg_module.network.name} not found")

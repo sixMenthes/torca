@@ -47,7 +47,8 @@ class VIT(L.LightningModule,VisionTransformer):
                  mask_f_prob,
                  mask2d,
                  ema_update_rate,
-                 mask_inference
+                 mask_inference,
+                 label_map
     ):
         
         L.LightningModule.__init__(self)
@@ -92,6 +93,7 @@ class VIT(L.LightningModule,VisionTransformer):
         self.layer_decay = optimizer.extras.layer_decay
         self.decay_type = optimizer.extras.decay_type
         self.scheduler_cfg = scheduler
+        self.label_map = label_map
 
         if self.global_pool == "attentive":
             #attentive_heads = self.embed_dim // self.num_heads
@@ -501,7 +503,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
                  mask2d,
                  ema_update_rate,
                  ppnet_cfg,
-                 mask_inference
+                 mask_inference,
+                 label_map
     ):
         
         L.LightningModule.__init__(self)
@@ -571,6 +574,7 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.layer_decay = optimizer.extras.layer_decay
         self.decay_type = optimizer.extras.decay_type
         self.scheduler_cfg = scheduler
+        self.label_map = label_map
 
         self.mask_2d = mask2d
         self.mask_t_prob = mask_t_prob

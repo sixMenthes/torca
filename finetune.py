@@ -42,6 +42,7 @@ def finetune(cfg: DictConfig):
             loader_configs=cfg.data.loaders,
             transform_configs=cfg.data.transform
         )
+        label_map = datamodule.label_map
 
     if sys.gettrace():
          log.info("Debugging mode, no logger")
