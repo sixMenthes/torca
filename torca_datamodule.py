@@ -47,6 +47,7 @@ class TorcaDataModule(L.LightningDataModule):
         self.labels = dataset_configs.labels
         self.num_classes = dataset_configs.num_classes
         self.failed_files = []
+        self.label_map = dict(zip(self.labels, range(self.num_classes)))
 
         self.df = self.load_df()
 
@@ -66,7 +67,6 @@ class TorcaDataModule(L.LightningDataModule):
 
     def setup(self, stage:str):
 
-        self.label_map = dict(zip(self.labels, range(self.num_classes)))
 
         if stage == "fit":
             train_transform = TrainTransform(self.transform_config)
