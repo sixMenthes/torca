@@ -93,7 +93,7 @@ class VIT(L.LightningModule,VisionTransformer):
         self.layer_decay = optimizer.extras.layer_decay
         self.decay_type = optimizer.extras.decay_type
         self.scheduler_cfg = scheduler
-        self.label_map = label_map
+        self.idx_to_label = {i: name for name, i in label_map.items()}
 
         if self.global_pool == "attentive":
             #attentive_heads = self.embed_dim // self.num_heads
@@ -285,9 +285,14 @@ class VIT(L.LightningModule,VisionTransformer):
         self.log(f'val_{self.val_metric.__class__.__name__}', metric, on_step=False, on_epoch=True, prog_bar=True)
         print("val metric:", metric.detach().cpu().item())
 
-        self.val_add_metrics(preds, targets)
-        for name, metric in self.val_add_metrics.items():
-            self.log(f'valid_{name}', metric, on_epoch=True, prog_bar=True)
+        results = self.val_add_metrics(preds, targets)
+        for name, value in results.items():
+            if value.numel() > 1:
+                for i, v in enumerate(value):
+                    label = self.idx_to_label[i]
+                    self.log(f'valid_{name}_{label}', v, on_epoch=True, prog_bar=False)
+            else:
+                self.log(f'valid_{name}', value, on_epoch=True, prog_bar=True)
 
         self.val_predictions = []
         self.val_targets = []
@@ -331,9 +336,14 @@ class VIT(L.LightningModule,VisionTransformer):
         self.test_metric(preds, targets)
         self.log(f'test_{self.test_metric.__class__.__name__}', self.test_metric, on_epoch=True, prog_bar=True)
 
-        self.test_add_metrics(preds, targets)
-        for name, metric in self.test_add_metrics.items():
-            self.log(f'test_{name}', metric, on_epoch=True, prog_bar=True)
+        results = self.test_add_metrics(preds, targets)
+        for name, metric in results.items():
+            if metric.numel() > 1:
+                for i, v in enumerate(metric):
+                    label = self.idx_to_label[i]
+                    self.log(f'test_{name}_{label}', v, on_epoch=True, prog_bar=False)
+            else:
+                self.log(f'test_{name}', metric, on_epoch=True, prog_bar=True)
 
     def configure_optimizers(self):
 
@@ -574,7 +584,7 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.layer_decay = optimizer.extras.layer_decay
         self.decay_type = optimizer.extras.decay_type
         self.scheduler_cfg = scheduler
-        self.label_map = label_map
+        self.idx_to_label = {i: name for name, i in label_map.items()}
 
         self.mask_2d = mask2d
         self.mask_t_prob = mask_t_prob
@@ -717,9 +727,14 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.log(f'val_{self.val_metric.__class__.__name__}', metric, on_step=False, on_epoch=True, prog_bar=True)
         print("val metric:", metric.detach().cpu().item())
 
-        self.val_add_metrics(preds, targets)
-        for name, metric in self.val_add_metrics.items():
-            self.log(f'valid_{name}', metric, on_epoch=True, prog_bar=True)
+        results = self.val_add_metrics(preds, targets)
+        for name, value in results.items():
+            if value.numel() > 1:
+                for i, v in enumerate(value):
+                    label = self.idx_to_label[i]
+                    self.log(f'valid_{name}_{label}', v, on_epoch=True, prog_bar=False)
+            else:
+                self.log(f'valid_{name}', value, on_epoch=True, prog_bar=True)
 
         self.val_predictions = []
         self.val_targets = []
@@ -764,9 +779,14 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.test_metric(preds, targets)
         self.log(f'test_{self.test_metric.__class__.__name__}', self.test_metric, on_epoch=True, prog_bar=True)
 
-        self.test_add_metrics(preds, targets)
-        for name, metric in self.test_add_metrics.items():
-            self.log(f'test_{name}', metric, on_epoch=True, prog_bar=True)
+        results = self.test_add_metrics(preds, targets)
+        for name, metric in results.items():
+            if metric.numel() > 1:
+                for i, v in enumerate(metric):
+                    label = self.idx_to_label[i]
+                    self.log(f'test_{name}_{label}', v, on_epoch=True, prog_bar=False)
+            else:
+                self.log(f'test_{name}', metric, on_epoch=True, prog_bar=True)
 
     def configure_optimizers(self):
         
