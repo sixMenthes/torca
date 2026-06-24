@@ -9,7 +9,7 @@ from torca_transforms import BaseTransform
 
 log = get_pylogger(__name__)
 
-class TorcaDataset(Dataset):
+class LabelDataset(Dataset):
     def __init__(self, df:pl.DataFrame, transform:BaseTransform, label_map: dict):
         self.df = df
         self.transform = transform

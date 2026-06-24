@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from torca_transforms import BaseTransform, TrainTransform
 from tqdm import tqdm
 from pathlib import Path, PurePath
-from torca_dataset import TorcaDataset
+from torca_dataset import LabelDataset
 
 log = get_pylogger(__name__)
 # input: B, C, H, W
@@ -70,13 +70,13 @@ class LabelDataModule(L.LightningDataModule):
 
         if stage == "fit":
             train_transform = TrainTransform(self.transform_config)
-            self.train_set = TorcaDataset(self.build_set("train"), train_transform, self.label_map)
+            self.train_set = LabelDataset(self.build_set("train"), train_transform, self.label_map)
             val_transform = BaseTransform(self.transform_config)
-            self.val_set = TorcaDataset(self.build_set("val"), val_transform, self.label_map)
+            self.val_set = LabelDataset(self.build_set("val"), val_transform, self.label_map)
 
         if stage == "test":
             test_transform = BaseTransform(self.transform_config)
-            self.test_set = TorcaDataset(self.build_set("test"), test_transform, self.label_map)
+            self.test_set = LabelDataset(self.build_set("test"), test_transform, self.label_map)
             
 
     def train_dataloader(self):
