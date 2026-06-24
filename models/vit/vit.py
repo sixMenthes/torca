@@ -1,5 +1,6 @@
 
 from functools import partial
+from omegaconf import OmegaConf
 
 import hydra
 import lightning as L
@@ -600,7 +601,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.pretrained_weights_path = pretrained_weights_path
         self.target_length = target_length
 
-        metric = hydra.utils.instantiate(metric_cfg)
+        metr_cfg = OmegaConf.create({k: v for k, v in metric_cfg.items() if k != "additional"})
+        metric = hydra.utils.instantiate(metr_cfg)
         
         additional_metrics = []
         if metric_cfg.get("additional"):

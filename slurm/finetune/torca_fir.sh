@@ -29,9 +29,10 @@ set -euo pipefail
 
 # ============================== USER SETTINGS ==============================
 PROJECT_ROOT="$HOME/torca"                 # repo root on Fir (has finetune.py)
+OUTPUT_DIR="$HOME/scratch/torca/runs"
 VENV="$HOME/torca_venv"                                            # prebuilt virtualenv
-CKPT="$HOME/scratch/torca_models/Bird-MAE-B"  # pretrained backbone
-TARBALL="$HOME/scratch/torca_data/dclde_clips.tar" # built by prestage script
+CKPT="$HOME/scratch/torca/models/Bird-MAE-B"  # pretrained backbone
+TARBALL="$HOME/scratch/torca/data/dclde_clips.tar" 
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"                  # absolute (Hydra chdir=True)
 # ==========================================================================
 
@@ -39,7 +40,8 @@ date; hostname
 echo "Job $SLURM_JOB_ID on $SLURMD_NODENAME"
 
 # --- environment ---------------------------------------------------------
-module load StdEnv/2023 python/3.10        # match the modules your venv was built with
+module load StdEnv/2023 python/3.11 gcc arrow/22.0.0
+       # match the modules your venv was built with
 source "$VENV/bin/activate"
 
 export PROJECT_ROOT
@@ -68,6 +70,7 @@ srun python finetune.py \
     trainer=single_gpu \
     trainer.devices=1 \
     trainer.precision=bf16 \
+    paths.output_dir="$OUTPUT_DIR" \
     paths.dataset_dir="$DATA_DIR" \
     data.dataset.parquet_path="$PARQUET" \
     module.network.pretrained_weights_path="$CKPT"

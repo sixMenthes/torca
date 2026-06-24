@@ -5,7 +5,6 @@ import lightning as L
 import sys
 import torch.nn as nn 
 from omegaconf import OmegaConf, DictConfig
-import pyrootutils
 from pathlib import Path 
 from torca_datamodule import LabelDataModule
 
@@ -15,12 +14,22 @@ from build_model import instantiate_callbacks, build_model
 
 log = get_pylogger(__name__)
 
-root = pyrootutils.setup_root(
-    search_from=__file__,
-    indicator=[".git"],
-    pythonpath=True,
-    dotenv=True,
-)
+from pathlib import Path
+import sys
+
+# find project root: walk up from this file until we hit a dir containing ".git"
+root = Path(__file__).resolve()
+while not (root / ".git").exists():
+    if root.parent == root:          # reached filesystem root
+        raise FileNotFoundError("could not find project root (no .git found)")
+    root = root.parent
+
+  # pythonpath=True
+sys.path.insert(0, str(root))
+
+# pyrootutils also sets this; keep it if any of your code reads os.environ["PROJECT_ROOT"]
+import os
+os.environ["PROJECT_ROOT"] = str(root)
 
 _HYDRA_PARAMS = {
     "version_base": None,
@@ -55,7 +64,7 @@ def finetune(cfg: DictConfig):
     callbacks = instantiate_callbacks(cfg["callbacks"])
                                       
     log.info("Setup trainer")
-    trainer = L.Trainer(**cfg.trainer, callbacks=callbacks, logger=logger, profiler="simple")
+    trainer = L.Trainer(**cfg.trainer, callbacks=callbacks, logger=logger, profiler="simple", fast_dev_run=True)
 
     log.info("Setup model")
     model = build_model(cfg.module, label_map)
