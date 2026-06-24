@@ -188,7 +188,8 @@ class LabelDataModule(L.LightningDataModule):
             return(df
                    .filter(~pl.col('Dataset').is_in(non_train_hydros))
                    .filter(pl.col('Labels') == 'SRKW')
-                   .drop_nulls(pl.col('CalltypeCategory')))
+                   .drop_nulls(pl.col('CalltypeCategory'))
+                   .filter(pl.col('CalltypeCategory').is_in(self.calls)))
         else: # I have to solve this
             strat_samples = []
             if self.class_to_balance:
