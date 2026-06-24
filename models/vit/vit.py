@@ -23,7 +23,7 @@ from torchmetrics import MetricCollection
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score, StratifiedGroupKFold
+from sklearn.model_selection import cross_val_score, GroupKFold
 from sklearn.metrics import make_scorer, f1_score
 
 
@@ -773,13 +773,14 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
 
         if self._probe_g:
             X = torch.cat(self._probe_g).float().numpy()
-            y = torch.cat(self._probe_y).float().numpy()
+            y = torch.cat(self._probe_y).numpy()
             grp = np.array(self._probe_grp)
             macro_f1 = make_scorer(f1_score, average="macro", zero_division=0)
-            f1 = cross_val_score(
-                LogisticRegression(max_iter=2000, class_weight="balanced"),
-                X, y, groups=grp, cv=StratifiedGroupKFold(n_splits=3), scoring=macro_f1).mean()
-            self.log("probe/calltype_macro_f1", float(f1), prog_bar=True)
+            if len(np.unique(grp)) >= 3:
+                f1 = cross_val_score(
+                    LogisticRegression(max_iter=2000, class_weight="balanced"),
+                    X, y, groups=grp, cv=GroupKFold(n_splits=3), scoring=macro_f1).mean()
+                self.log("probe/calltype_macro_f1", float(f1), prog_bar=True)
         self._probe_g, self._probe_y, self._probe_grp = [], [], []
 
     

@@ -15,8 +15,9 @@ low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab',  'MS_671879205', 'Field_H
 labels: ['Background', 'HW', 'SRKW', 'TKW']
 num_classes: 4 #to review
 
-calls: ['S01', 'S04', 'S19', 'S14', 'S02', 'S06', 'S12', 'S10', 'S13', 'S36', 'S32', 'S31', 'S22', 'S41', 'S08', 'S42', 'S44', 'S17', 'S05', 'S40', 'S03', 'S37', 'S16', 'S33', 'S18', 'S07']
-num_calls: 26
+calls: ['S42', 'S03', 'S10', 'S44', 'S05', 'S06', 'S14', 'S18', 'S12', 'S19', 'S13', 'S04', 'S17', 'S41', 'S02', 'S01', 'S07', 'S08', 'S36', 'S16', 'S37']
+
+num_calls: 21
 
 class_to_balance: {}
 
