@@ -100,7 +100,7 @@ class LabelDataModule(L.LightningDataModule):
             self.val_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
-            shuffle=self.val_loader_configs.shuffle
+            shuffle=self.val_loader_configs.shuffle,
             persistent_workers=self.val_loader_configs.persistent_workers,
             pin_memory=self.val_loader_configs.pin_memory
         )
@@ -108,7 +108,7 @@ class LabelDataModule(L.LightningDataModule):
             self.call_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
-            shuffle=self.val_loader_configs.shuffle
+            shuffle=self.val_loader_configs.shuffle,
             persistent_workers=self.val_loader_configs.persistent_workers,
             pin_memory=self.val_loader_configs.pin_memory
         )
