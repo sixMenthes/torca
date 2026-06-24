@@ -64,7 +64,7 @@ def finetune(cfg: DictConfig):
     callbacks = instantiate_callbacks(cfg["callbacks"])
                                       
     log.info("Setup trainer")
-    trainer = L.Trainer(**cfg.trainer, callbacks=callbacks, logger=logger, profiler="simple", fast_dev_run=True)
+    trainer = L.Trainer(**cfg.trainer, callbacks=callbacks, logger=logger, profiler="simple")
 
     log.info("Setup model")
     model = build_model(cfg.module, label_map)
