@@ -770,8 +770,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.val_targets = []
 
         if self._probe_g:
-            X = torch.cat(self._probe_g).numpy()
-            y = torch.cat(self._probe_y).numpy()
+            X = torch.cat(self._probe_g).float().numpy()
+            y = torch.cat(self._probe_y).float().numpy()
             grp = np.array(self._probe_grp)
             macro_f1 = make_scorer(f1_score, average="macro", zero_division=0)
             f1 = cross_val_score(

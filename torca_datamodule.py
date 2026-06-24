@@ -90,7 +90,9 @@ class LabelDataModule(L.LightningDataModule):
             self.train_set,
             num_workers = self.train_loader_configs.num_workers,
             batch_size=self.train_loader_configs.batch_size,
-            shuffle=self.train_loader_configs.shuffle
+            shuffle=self.train_loader_configs.shuffle,
+            persistent_workers=self.train_loader_configs.persistent_workers,
+            pin_memory=self.train_loader_configs.pin_memory
         )
 
     def val_dataloader(self):
@@ -99,12 +101,16 @@ class LabelDataModule(L.LightningDataModule):
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=self.val_loader_configs.shuffle
+            persistent_workers=self.val_loader_configs.persistent_workers,
+            pin_memory=self.val_loader_configs.pin_memory
         )
         call_dataloader = DataLoader(
             self.call_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=self.val_loader_configs.shuffle
+            persistent_workers=self.val_loader_configs.persistent_workers,
+            pin_memory=self.val_loader_configs.pin_memory
         )
         return [val_dataloader, call_dataloader]
 
