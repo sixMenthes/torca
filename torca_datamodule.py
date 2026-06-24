@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from torca_transforms import BaseTransform, TrainTransform
 from tqdm import tqdm
 from pathlib import Path, PurePath
-from torca_dataset import TorcaDataset
+from torca_dataset import LabelDataset, CallDataset
 
 log = get_pylogger(__name__)
 # input: B, C, H, W
@@ -22,7 +22,7 @@ def collate_fn_skip(batch):
     return torch.utils.default_collate(batch) if batch else None
 
 
-class TorcaDataModule(L.LightningDataModule):
+class LabelDataModule(L.LightningDataModule):
     def __init__(
             self,
             dataset_configs: DictConfig, 
@@ -44,15 +44,21 @@ class TorcaDataModule(L.LightningDataModule):
         self.num_workers = dataset_configs.num_workers
         self.clip_duration = dataset_configs.clip_duration
         self.gcl = gcsfs.core.GCSFileSystem(token='anon')
-        self.labels = dataset_configs.labels
-        self.num_classes = dataset_configs.num_classes
         self.failed_files = []
-        self.label_map = dict(zip(self.labels, range(self.num_classes)))
 
-        self.df = self.load_df()
 
 ################
 
+        self.labels = dataset_configs.labels
+        self.calls = dataset_configs.calls
+        self.num_calls = dataset_configs.num_calls
+        self.num_classes = dataset_configs.num_classes
+        self.label_map = dict(zip(self.labels, range(self.num_classes)))
+        self.call_map = dict(zip(self.calls, range(self.num_calls)))
+
+################
+
+        self.df = self.load_df()
         self.transform_config = transform_configs
 
         self.train_loader_configs = loader_configs.train
@@ -67,16 +73,16 @@ class TorcaDataModule(L.LightningDataModule):
 
     def setup(self, stage:str):
 
-
         if stage == "fit":
             train_transform = TrainTransform(self.transform_config)
-            self.train_set = TorcaDataset(self.build_set("train"), train_transform, self.label_map)
+            self.train_set = LabelDataset(self.build_set("train"), train_transform, self.label_map)
             val_transform = BaseTransform(self.transform_config)
-            self.val_set = TorcaDataset(self.build_set("val"), val_transform, self.label_map)
+            self.val_set = LabelDataset(self.build_set("val"), val_transform, self.label_map)
+            self.call_set = CallDataset(self.build_set("calls"), val_transform, self.call_map)
 
         if stage == "test":
             test_transform = BaseTransform(self.transform_config)
-            self.test_set = TorcaDataset(self.build_set("test"), test_transform, self.label_map)
+            self.test_set = LabelDataset(self.build_set("test"), test_transform, self.label_map)
             
 
     def train_dataloader(self):
@@ -88,12 +94,20 @@ class TorcaDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self):
-        return DataLoader(
+        val_dataloader =  DataLoader(
             self.val_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=self.val_loader_configs.shuffle
         )
+        call_dataloader = DataLoader(
+            self.call_set,
+            num_workers=self.val_loader_configs.num_workers,
+            batch_size=self.val_loader_configs.batch_size,
+            shuffle=self.val_loader_configs.shuffle
+        )
+        return [val_dataloader, call_dataloader]
+
 
     def test_dataloader(self):
         return DataLoader(
@@ -151,7 +165,7 @@ class TorcaDataModule(L.LightningDataModule):
 
     def build_set(self, split:str):
 
-        assert (split in {"test", "val", "train"}), "split must be one of train, val or test"
+        #assert (split in {"test", "val", "train"}), "split must be one of train, val or test"
         #also i should assert that classes to balance is a subset of labels
         df = self.df.filter(pl.col('Labels').is_in(self.labels))
         
@@ -163,6 +177,12 @@ class TorcaDataModule(L.LightningDataModule):
             return (df
                     .filter(pl.col('Dataset').is_in(self.val_hydros))
                     .with_columns(pl.lit("val").alias("split")))
+        elif split == "calls":
+            non_train_hydros = self.low_sr_hydros + self.val_hydros + self.test_hydros
+            return(df
+                   .filter(~pl.col('Dataset').is_in(non_train_hydros))
+                   .filter(pl.col('Labels') == 'SRKW')
+                   .drop_nulls(pl.col('CalltypeCategory')))
         else: # I have to solve this
             strat_samples = []
             if self.class_to_balance:
@@ -184,8 +204,6 @@ class TorcaDataModule(L.LightningDataModule):
                         ~pl.col("Dataset").is_in(self.low_sr_hydros),
                         ~pl.col("Dataset").is_in(self.val_hydros)
                 )
-
-    
 
     def load_df(self):
 
@@ -253,10 +271,11 @@ def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_dur
     return pl.concat([new_samples, stratified_sampling(label, tgt_duration, df, curr_duration+added, seed=seed)])
 
 
+
 if __name__ == "__main__":
     data_conf = OmegaConf.load("configs/data/dataset/DCLDE_test.yaml")
     loader_conf = OmegaConf.load("configs/data/loaders/default.yaml")
     transform_conf = OmegaConf.load("/Users/leo/projects/orcas/torca/configs/data/transform/melbank_dclde_test.yaml")
-    module = TorcaDataModule(data_conf, loader_conf, transform_conf)
+    module = LabelDataModule(data_conf, loader_conf, transform_conf)
 
 

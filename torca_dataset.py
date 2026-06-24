@@ -9,7 +9,7 @@ from torca_transforms import BaseTransform
 
 log = get_pylogger(__name__)
 
-class TorcaDataset(Dataset):
+class LabelDataset(Dataset):
     def __init__(self, df:pl.DataFrame, transform:BaseTransform, label_map: dict):
         self.df = df
         self.transform = transform
@@ -29,6 +29,29 @@ class TorcaDataset(Dataset):
             wave = torch.from_numpy(audio).T
             features = self.transform(wave.data)
             return {"audio": features, "label": label}
+        else:
+            log.warning(f"Failed loading file \t {path}")
+            return None
+
+class CallDataset(Dataset):
+    def __init__(self, df:pl.DataFrame, transform:BaseTransform, call_map: dict):
+        self.df = df
+        self.transform = transform
+        self.call_map = call_map
+
+    def __len__(self):
+        return self.df.height
+
+    def __getitem__(self, index):
+        row = self.df.row(index, named=True)
+        path = row["LocalPath"]
+        ds = row["Dataset"]
+        if os.path.exists(path):
+            call = self.call_map[row["CalltypeCategory"]]
+            audio, sr = sf.read(path, dtype="float32", always_2d=True)
+            wave = torch.from_numpy(audio).T
+            features = self.transform(wave.data)
+            return {"audio": features, "call": call, "dataset": ds}
         else:
             log.warning(f"Failed loading file \t {path}")
             return None
