@@ -4,13 +4,20 @@ train:
   shuffle: true
   #drop_last: true
   drop_last: false
+  persistent_workers: true
+  pin_memory: True
+
 
 val:
-  num_workers: 8
+  num_workers: 4
   batch_size: 64
   shuffle: false
+  persistent_workers: true
+  pin_memory: True
 
 test:
   num_workers: 4
   batch_size: 48
   shuffle: false
+  persistent_workers: false
+  pin_memory: false
