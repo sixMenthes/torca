@@ -22,16 +22,16 @@
 #SBATCH --time=24:00:00                  # 60 epochs; tune to your measured epoch time
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.out
-##SBATCH --mail-user=six.menthes@gmail.com
+##SBATCH --mail-user=XXXX@gmail.com
 ##SBATCH --mail-type=END,FAIL
 
 set -euo pipefail
 
 # ============================== USER SETTINGS ==============================
-PROJECT_ROOT="$HOME/projects/def-XXXX/$USER/torca"                 # repo root on Fir (has finetune.py)
+PROJECT_ROOT="$HOME/torca"                 # repo root on Fir (has finetune.py)
 VENV="$HOME/torca_venv"                                            # prebuilt virtualenv
-CKPT="$PROJECT_ROOT/checkpoints/AudioMAE_XCL_epoch=99_mixup.ckpt"  # pretrained backbone
-TARBALL="$HOME/projects/def-XXXX/$USER/torca_data/dclde_clips.tar" # built by prestage script
+CKPT="$HOME/scratch/torca_models/Bird-MAE-B"  # pretrained backbone
+TARBALL="$HOME/scratch/torca_data/dclde_clips.tar" # built by prestage script
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"                  # absolute (Hydra chdir=True)
 # ==========================================================================
 
@@ -68,7 +68,7 @@ srun python finetune.py \
     trainer=single_gpu \
     trainer.devices=1 \
     trainer.precision=bf16 \
-    data.dataset.dataset_dir="$DATA_DIR" \
+    paths.dataset_dir="$DATA_DIR" \
     data.dataset.parquet_path="$PARQUET" \
     module.network.pretrained_weights_path="$CKPT"
 

@@ -1,7 +1,5 @@
 parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
-
 dataset_dir: ${paths.dataset_dir}
-
 name: DCLDE_no_balance
 
 num_workers: 4 #change pls

@@ -3,5 +3,5 @@ model_checkpoint:
   dirpath: ${paths.output_dir}/checkpoints
   filename: ${module.network.name}_${data.dataset.name}_{epoch:02d}
   save_last: true
-  save_top_k: 0
+  save_top_k: 1
   
