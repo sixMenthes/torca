@@ -22,7 +22,7 @@ def collate_fn_skip(batch):
     return torch.utils.default_collate(batch) if batch else None
 
 
-class TorcaDataModule(L.LightningDataModule):
+class LabelDataModule(L.LightningDataModule):
     def __init__(
             self,
             dataset_configs: DictConfig, 
@@ -257,6 +257,6 @@ if __name__ == "__main__":
     data_conf = OmegaConf.load("configs/data/dataset/DCLDE_test.yaml")
     loader_conf = OmegaConf.load("configs/data/loaders/default.yaml")
     transform_conf = OmegaConf.load("/Users/leo/projects/orcas/torca/configs/data/transform/melbank_dclde_test.yaml")
-    module = TorcaDataModule(data_conf, loader_conf, transform_conf)
+    module = LabelDataModule(data_conf, loader_conf, transform_conf)
 
 
