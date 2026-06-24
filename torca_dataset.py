@@ -32,3 +32,27 @@ class LabelDataset(Dataset):
         else:
             log.warning(f"Failed loading file \t {path}")
             return None
+
+class CallDataset(Dataset):
+    def __init__(self, df:pl.DataFrame, transform:BaseTransform, call_map: dict):
+        self.df = df
+        self.transform = transform
+        self.call_map = call_map
+
+    def __len__(self):
+        return self.df.height
+
+    def __getitem__(self, index):
+        row = self.df.row(index, named=True)
+        path = row["LocalPath"]
+        if os.path.exists(path):
+            call = self.call_map[row["CalltypeCategory"]]
+            num_classes = len(self.label_map.keys())
+            call = F.one_hot(torch.tensor(call), num_classes = num_classes)
+            audio, sr = sf.read(path, dtype="float32", always_2d=True)
+            wave = torch.from_numpy(audio).T
+            features = self.transform(wave.data)
+            return {"audio": features, "call": call}
+        else:
+            log.warning(f"Failed loading file \t {path}")
+            return None
