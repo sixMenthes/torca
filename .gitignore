@@ -16,3 +16,5 @@ scripts/runs/
 *.ipynb
 .hf_birdmae_venv/
 scripts/foundation_model/
+.mlflowvenv
+mlflow.db
