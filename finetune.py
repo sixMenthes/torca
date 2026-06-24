@@ -58,7 +58,7 @@ def finetune(cfg: DictConfig):
     trainer = L.Trainer(**cfg.trainer, callbacks=callbacks, logger=logger)
 
     log.info("Setup model")
-    model = build_model(cfg.module)
+    model = build_model(cfg.module, label_map)
 
     pretrained_weights_path = cfg.module.network.get("pretrained_weights_path", None)
 
