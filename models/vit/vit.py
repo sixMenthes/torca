@@ -20,6 +20,12 @@ from ..components.ema import EMA
 from ..ppnet.ppnet import PPNet
 from torchmetrics import MetricCollection
 
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score, StratifiedGroupKFold
+from sklearn.metrics import make_scorer, f1_score
+
+
 class VIT(L.LightningModule,VisionTransformer):
 
     def __init__(self, 
@@ -584,6 +590,7 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.layer_decay = optimizer.extras.layer_decay
         self.decay_type = optimizer.extras.decay_type
         self.scheduler_cfg = scheduler
+        self.label_map = label_map
         self.idx_to_label = {i: name for name, i in label_map.items()}
 
         self.mask_2d = mask2d
@@ -660,20 +667,22 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         else:
             x = x[:,1:,:].permute(0,2,1).reshape(B, self.embed_dim, 8, 32)
 
-        logits,_ = self.ppnet(x)
+        logits, rest = self.ppnet(x)
 
-        return logits
+        activations = rest[0]
+
+        return logits, activations
     
 
     def forward(self, x):
-        logits = self.forward_features(x)
-        return logits 
+        logits, activations = self.forward_features(x)
+        return logits, activations 
 
 
     def training_step(self, batch, batch_idx):
         audio = batch["audio"]
         targets = batch["label"]
-        logits = self(audio)
+        logits, _ = self(audio)
         targets = targets.long()
         #preds = logits.sigmoid()
         bce_loss = self.loss(logits, targets.float())
@@ -691,14 +700,14 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step_0(self, batch, batch_idx):
         audio = batch["audio"]
         targets = batch["label"]
 
         if self.ema: 
             self.ema.apply_shadow()
 
-        pred = self(audio)
+        pred, _ = self(audio)
         targets = targets.long()
         try:
             loss  = self.loss(pred, targets)
@@ -711,11 +720,32 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.val_targets.append(targets.detach().cpu())
 
         #self.log(f'val_{self.val_metric.__class__.__name__}', metric, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
 
         if self.ema:
             self.ema.restore()
     
+    def call_step(self, batch, batch_idx):
+        audio = batch["audio"]
+        targets = batch["call"]
+        groups = batch["dataset"]
+        
+        _, activations = self(audio)
+        mask = self.ppnet.prototype_class_identity == self.label_map['SRKW']
+        self._probe_g.append(activations.detach().cpu()[:, mask])
+        self._probe_y.append(targets.detach().cpu())
+        self._probe_grp.extend(groups)
+
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        if dataloader_idx == 0:
+            self.validation_step_0(batch, batch_idx)
+        elif dataloader_idx == 1:
+            self.call_step(batch, batch_idx)
+
+    def on_validation_epoch_start(self):
+        self._probe_g, self._probe_y, self._probe_grp = [], [], []
+    
+
     def on_validation_epoch_end(self):
         preds = torch.cat(self.val_predictions)
         targets = torch.cat(self.val_targets)
@@ -738,6 +768,18 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
 
         self.val_predictions = []
         self.val_targets = []
+
+        if self._probe_g:
+            X = torch.cat(self._probe_g).numpy()
+            y = torch.cat(self._probe_y).numpy()
+            grp = np.array(self._probe_grp)
+            macro_f1 = make_scorer(f1_score, average="macro", zero_division=0)
+            f1 = cross_val_score(
+                LogisticRegression(max_iter=2000, class_weight="balanced"),
+                X, y, groups=grp, cv=StratifiedGroupKFold(n_splits=3), scoring=macro_f1).mean()
+            self.log("probe/calltype_macro_f1", float(f1), prog_bar=True)
+        self._probe_g, self._probe_y, self._probe_grp = [], [], []
+
     
     def test_step(self, batch, batch_idx):
         audio = batch["audio"]
@@ -749,7 +791,7 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         self.mask_t_prob = 0.0
         self.mask_f_prob = 0.0 #fix later!
 
-        pred = self(audio)
+        pred, _ = self(audio)
         if self.class_mask: 
         # if targets.shape == pred.shape:
         #     targets = targets[:, self.class_mask]

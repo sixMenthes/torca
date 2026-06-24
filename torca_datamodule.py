@@ -44,15 +44,21 @@ class LabelDataModule(L.LightningDataModule):
         self.num_workers = dataset_configs.num_workers
         self.clip_duration = dataset_configs.clip_duration
         self.gcl = gcsfs.core.GCSFileSystem(token='anon')
-        self.labels = dataset_configs.labels
-        self.num_classes = dataset_configs.num_classes
         self.failed_files = []
-        self.label_map = dict(zip(self.labels, range(self.num_classes)))
 
-        self.df = self.load_df()
 
 ################
 
+        self.labels = dataset_configs.labels
+        self.calls = dataset_configs.calls
+        self.num_calls = dataset_configs.num_calls
+        self.num_classes = dataset_configs.num_classes
+        self.label_map = dict(zip(self.labels, range(self.num_classes)))
+        self.call_map = dict(zip(self.calls, range(self.num_calls)))
+
+################
+
+        self.df = self.load_df()
         self.transform_config = transform_configs
 
         self.train_loader_configs = loader_configs.train
@@ -72,6 +78,7 @@ class LabelDataModule(L.LightningDataModule):
             self.train_set = LabelDataset(self.build_set("train"), train_transform, self.label_map)
             val_transform = BaseTransform(self.transform_config)
             self.val_set = LabelDataset(self.build_set("val"), val_transform, self.label_map)
+            self.call_set = CallDataset(self.build_set("calls"), val_transform, self.call_map)
 
         if stage == "test":
             test_transform = BaseTransform(self.transform_config)
@@ -87,12 +94,20 @@ class LabelDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self):
-        return DataLoader(
+        val_dataloader =  DataLoader(
             self.val_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=self.val_loader_configs.shuffle
         )
+        call_dataloader = DataLoader(
+            self.call_set,
+            num_workers=self.val_loader_configs.num_workers,
+            batch_size=self.val_loader_configs.batch_size,
+            shuffle=self.val_loader_configs.shuffle
+        )
+        return [val_dataloader, call_dataloader]
+
 
     def test_dataloader(self):
         return DataLoader(
@@ -150,7 +165,7 @@ class LabelDataModule(L.LightningDataModule):
 
     def build_set(self, split:str):
 
-        assert (split in {"test", "val", "train"}), "split must be one of train, val or test"
+        #assert (split in {"test", "val", "train"}), "split must be one of train, val or test"
         #also i should assert that classes to balance is a subset of labels
         df = self.df.filter(pl.col('Labels').is_in(self.labels))
         
@@ -162,6 +177,12 @@ class LabelDataModule(L.LightningDataModule):
             return (df
                     .filter(pl.col('Dataset').is_in(self.val_hydros))
                     .with_columns(pl.lit("val").alias("split")))
+        elif split == "calls":
+            non_train_hydros = self.low_sr_hydros + self.val_hydros + self.test_hydros
+            return(df
+                   .filter(~pl.col('Dataset').is_in(non_train_hydros))
+                   .filter(pl.col('Labels') == 'SRKW')
+                   .drop_nulls(pl.col('CalltypeCategory')))
         else: # I have to solve this
             strat_samples = []
             if self.class_to_balance:
@@ -183,8 +204,6 @@ class LabelDataModule(L.LightningDataModule):
                         ~pl.col("Dataset").is_in(self.low_sr_hydros),
                         ~pl.col("Dataset").is_in(self.val_hydros)
                 )
-
-    
 
     def load_df(self):
 
@@ -250,123 +269,6 @@ def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_dur
         return df.clear()
 
     return pl.concat([new_samples, stratified_sampling(label, tgt_duration, df, curr_duration+added, seed=seed)])
-
-
-class CallDataModule(L.LightningDataModule):
-    
-    def __init__(
-            self,
-            dataset_configs: DictConfig, 
-            loader_configs: DictConfig, 
-            transform_configs: DictConfig
-    ):
-        super().__init__()
-
-        self.parquet_path = dataset_configs.parquet_path
-        self.name = dataset_configs.name
-        self.columns = dataset_configs.columns
-
-        self.test_hydros = dataset_configs.test_hydros
-        self.low_sr_hydros = dataset_configs.low_sr_hydros
-        self.val_hydros = dataset_configs.val_hydros
-        self.class_to_balance = dataset_configs.class_to_balance
-        
-        self.data_dir = dataset_configs.dataset_dir
-        self.num_workers = dataset_configs.num_workers
-        self.clip_duration = dataset_configs.clip_duration
-        self.num_classes = dataset_configs.num_calls
-        self.calls = dataset_configs.calls
-        self.failed_files = []
-        self.call_map = dict(zip(self.calls, range(self.num_calls)))
-
-        self.df = self.load_df()
-
-################
-
-        self.transform_config = transform_configs
-
-        self.train_loader_configs = loader_configs.train
-        self.val_loader_configs = loader_configs.val
-        self.test_loader_configs = loader_configs.test
-
-    def prepare_data(self):
-        pass
-
-
-    def setup(self, stage:str):
-
-        if stage == "fit":
-            val_transform = BaseTransform(self.transform_config)
-            self.val_set = CallDataset(self.df, val_transform, self.call_map)
-
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_set,
-            num_workers = self.train_loader_configs.num_workers,
-            batch_size=self.train_loader_configs.batch_size,
-            shuffle=self.train_loader_configs.shuffle
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.val_set,
-            num_workers=self.val_loader_configs.num_workers,
-            batch_size=self.val_loader_configs.batch_size,
-            shuffle=self.val_loader_configs.shuffle
-        )
-
-    def test_dataloader(self):
-        return DataLoader(
-            self.test_set,
-            num_workers=self.test_loader_configs.num_workers,
-            batch_size=self.test_loader_configs.batch_size,
-            shuffle=self.test_loader_configs.shuffle
-        )
-
-    def load_df(self):
-
-        df = pl.read_parquet(self.parquet_path)
-
-        duration = pl.col('FileEndSec') - pl.col('FileBeginSec')
-        center_time = pl.col('FileBeginSec') + (duration / 2.0)
-        new_start_time = pl.max_horizontal(pl.lit(0), center_time - self.clip_duration/2.0)
-        new_end_time = (new_start_time + self.clip_duration)
-
-        df = (df
-            .filter(pl.col("NewFileOk") & (pl.col("Labels") == "SRKW"))
-            .filter(pl.col("Dataset").is_in(self.test_hydros + self.val_hydros))
-            .drop_nulls(pl.col('CalltypeCategory'))
-            .with_columns(
-                duration.alias('true_duration'),
-                center_time.alias('center_time'),
-                new_start_time.alias('new_start_time'),
-                new_end_time.alias('new_end_time')
-                )
-            .drop(
-                pl.col("FileBeginSec"),
-                pl.col("FileEndSec"),
-                pl.col("Duration"),
-                )
-            )
-
-        stem = pl.col("Soundfile").str.replace(r"\.[^.]+$", "")
-        start_ms = (pl.col("new_start_time") * 1000).round().cast(pl.Int64).cast(pl.String).str.zfill(10)
-        end_ms   = (pl.col("new_end_time")   * 1000).round().cast(pl.Int64).cast(pl.String).str.zfill(10)
-
-        local_path = pl.format(
-            "{}/{}/{}/{}/{}-{}{}",
-            pl.lit(self.data_dir),
-            pl.col("Provider"),
-            pl.col("Dataset"),
-            stem,
-            start_ms,
-            end_ms,
-            pl.lit(".wav"),
-            )
-        
-        return (df
-                .rename({"NewPath": "GCSPath"})
-                .with_columns(local_path.alias("LocalPath")))
 
 
 

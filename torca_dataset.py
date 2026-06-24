@@ -45,14 +45,13 @@ class CallDataset(Dataset):
     def __getitem__(self, index):
         row = self.df.row(index, named=True)
         path = row["LocalPath"]
+        ds = row["Dataset"]
         if os.path.exists(path):
             call = self.call_map[row["CalltypeCategory"]]
-            num_classes = len(self.label_map.keys())
-            call = F.one_hot(torch.tensor(call), num_classes = num_classes)
             audio, sr = sf.read(path, dtype="float32", always_2d=True)
             wave = torch.from_numpy(audio).T
             features = self.transform(wave.data)
-            return {"audio": features, "call": call}
+            return {"audio": features, "call": call, "dataset": ds}
         else:
             log.warning(f"Failed loading file \t {path}")
             return None
