@@ -1,6 +1,0 @@
-artifact_location: /home/tundra/projects/torca/logs//mlflow/mlruns/584970600783353734
-creation_time: 1781760474010
-experiment_id: '584970600783353734'
-last_update_time: 1781760474010
-lifecycle_stage: active
-name: Finetune with no pre-training

@@ -19,7 +19,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16               # <= 24 (= 1/8 of a 192-core Fir GPU node)
 #SBATCH --mem=64G
-#SBATCH --time=24:00:00                  # 60 epochs; tune to your measured epoch time
+#SBATCH --time=02:00:00                  # 60 epochs; tune to your measured epoch time
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.out
 ##SBATCH --mail-user=XXXX@gmail.com
