@@ -687,7 +687,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         logits, _ = self(audio)
         targets = targets.long()
         #preds = logits.sigmoid()
-        bce_loss = self.loss(logits, targets.float())
+        assert (targets.sum(dim=1) == 1).all()
+        bce_loss = self.loss(logits, targets.argmax(dim=1))
         orthogonality_loss = self.calculate_orthogonality_loss()
 
         self.log('bce_loss', bce_loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -712,9 +713,9 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         pred, _ = self(audio)
         targets = targets.long()
         try:
-            loss  = self.loss(pred, targets)
+            loss  = self.loss(pred, targets.argmax(dim=1))
         except:
-            loss = self.loss(pred, targets.float())
+            loss = self.loss(pred, targets.argmax(dim=1))
 
         #metric = self.val_metric(pred, targets)
         #pred = torch.softmax(pred, dim=1)
@@ -802,9 +803,9 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
 
         targets = targets.long()
         try:
-            loss  = self.loss(pred, targets)
+            loss  = self.loss(pred, targets.argmax(dim=1))
         except:
-            loss = self.loss(pred, targets.float())
+            loss = self.loss(pred, targets.argmax(dim=1))
         
         self.test_predictions.append(pred.detach().cpu())
         self.test_targets.append(targets.detach().cpu())
