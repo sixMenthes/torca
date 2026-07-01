@@ -1,9 +1,10 @@
 root_dir: ${oc.env:PROJECT_ROOT}
 work_dir: ${hydra:runtime.cwd}
+scratch_dir: ${oc.env:OUTPUT_DIR}          # independent base (set by slurm); drives hydra.run.dir
 
 #output
-output_dir: ${hydra:runtime.output_dir}
+output_dir: ${hydra:runtime.output_dir}    # = the per-run hydra dir (alias)
 
 dataset_dir: /data/dclde_no_balance
-model_dir: ${paths.output_dir}/checkpoints/
-log_dir: ${paths.output_dir}/logs/
+model_dir: ${paths.output_dir}/checkpoints/   # per-run checkpoints, no collisions
+log_dir: ${paths.scratch_dir}/logs/           # shared MLflow store across runs

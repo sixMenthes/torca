@@ -23,6 +23,7 @@ set -euo pipefail
 
 # ============================== USER SETTINGS ==============================
 PROJECT_ROOT="$HOME/projects/def-XXXX/$USER/torca"
+OUTPUT_DIR="$HOME/scratch/torca"           # scratch BASE; hydra appends /runs/.../<timestamp>
 VENV="$HOME/torca_venv"
 CKPT="$PROJECT_ROOT/checkpoints/AudioMAE_XCL_epoch=99_mixup.ckpt"
 SQFS="$HOME/projects/def-XXXX/$USER/torca_data/dclde_clips.sqfs"   # built by prestage_..._squashfs.sh
@@ -36,7 +37,7 @@ echo "Job $SLURM_JOB_ID on $SLURMD_NODENAME"
 module load StdEnv/2023 python/3.10 squashfuse
 source "$VENV/bin/activate"
 
-export PROJECT_ROOT HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false
+export PROJECT_ROOT OUTPUT_DIR HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 
 cd "$PROJECT_ROOT"

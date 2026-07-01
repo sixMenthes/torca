@@ -5,7 +5,7 @@ defaults:
 job:
   chdir: True
 run:
-  dir: ${paths.output_dir}/runs/${task_name}/${data.dataset.name}/${module.network.name}/${now:%Y-%m-%d_%H%M%S}
-sweep: 
-  dir: ${paths.output_dir}/runs/${task_name}/multiruns/${data.dataset.name}/${module.network.name}/${now:%Y-%m-%d_%H%M%S}
+  dir: ${paths.scratch_dir}/runs/${task_name}/${data.dataset.name}/${module.network.name}/${now:%Y-%m-%d_%H%M%S}
+sweep:
+  dir: ${paths.scratch_dir}/runs/${task_name}/multiruns/${data.dataset.name}/${module.network.name}/${now:%Y-%m-%d_%H%M%S}
   subdir: ${hydra.job.num}

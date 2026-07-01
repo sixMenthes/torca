@@ -29,7 +29,7 @@ set -euo pipefail
 
 # ============================== USER SETTINGS ==============================
 PROJECT_ROOT="$HOME/torca"                 # repo root on Fir (has finetune.py)
-OUTPUT_DIR="$HOME/scratch/torca/runs"
+OUTPUT_DIR="$HOME/scratch/torca"           # scratch BASE; hydra appends /runs/.../<timestamp>
 VENV="$HOME/torca_venv"                                            # prebuilt virtualenv
 CKPT="$HOME/scratch/torca/models/Bird-MAE-B"  # pretrained backbone
 TARBALL="$HOME/scratch/torca/data/dclde_clips.tar" 
@@ -45,6 +45,7 @@ module load StdEnv/2023 python/3.11 gcc arrow/22.0.0
 source "$VENV/bin/activate"
 
 export PROJECT_ROOT
+export OUTPUT_DIR                           # consumed by paths.scratch_dir -> hydra.run.dir
 export HYDRA_FULL_ERROR=1
 export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
@@ -70,7 +71,6 @@ srun python finetune.py \
     trainer=single_gpu \
     trainer.devices=1 \
     trainer.precision=bf16 \
-    paths.output_dir="$OUTPUT_DIR" \
     paths.dataset_dir="$DATA_DIR" \
     data.dataset.parquet_path="$PARQUET" \
     module.network.pretrained_weights_path="$CKPT"
