@@ -10,7 +10,7 @@ defaults:
   - module/network: vit_base_16_dclde
   - module/optimizer: adamw
   - module/scheduler: cosine
-  - module/loss: asymmetric_loss
+  - module/loss: single_label
   - module/metric: DCLDE #change pls
   - paths: workstation
   - trainer: single_gpu
