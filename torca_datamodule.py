@@ -2,7 +2,7 @@ import lightning as L
 from omegaconf import DictConfig, OmegaConf
 from util.pylogger import get_pylogger
 import polars as pl
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchaudio.compliance.kaldi import fbank
 import torch
 import os
@@ -39,7 +39,10 @@ class LabelDataModule(L.LightningDataModule):
         self.low_sr_hydros = dataset_configs.low_sr_hydros
         self.val_hydros = dataset_configs.val_hydros
         self.class_to_balance = dataset_configs.class_to_balance
-        
+        # desired relative class proportions for the weighted train sampler;
+        # None -> balanced (inverse-frequency) across all present classes.
+        self.class_sampling_weights = dataset_configs.get("class_sampling_weights", None)
+
         self.data_dir = dataset_configs.dataset_dir
         self.num_workers = dataset_configs.num_workers
         self.clip_duration = dataset_configs.clip_duration
@@ -74,7 +77,7 @@ class LabelDataModule(L.LightningDataModule):
     def setup(self, stage:str):
 
         if stage == "fit":
-            train_transform = TrainTransform(self.transform_config)
+            train_transform = TrainTransform(self.transform_config, background_paths=self._background_bank())
             self.train_set = LabelDataset(self.build_set("train"), train_transform, self.label_map)
             val_transform = BaseTransform(self.transform_config)
             self.val_set = LabelDataset(self.build_set("val"), val_transform, self.label_map)
@@ -86,14 +89,41 @@ class LabelDataModule(L.LightningDataModule):
             
 
     def train_dataloader(self):
+        # WeightedRandomSampler oversamples the rare classes (HW/TKW); it is
+        # mutually exclusive with shuffle, so shuffle is forced off.
+        sampler = self._make_train_sampler(self.train_set.df)
         return DataLoader(
             self.train_set,
             num_workers = self.train_loader_configs.num_workers,
             batch_size=self.train_loader_configs.batch_size,
-            shuffle=self.train_loader_configs.shuffle,
+            sampler=sampler,
+            shuffle=False,
             persistent_workers=self.train_loader_configs.persistent_workers,
             pin_memory=self.train_loader_configs.pin_memory
         )
+
+    def _background_bank(self):
+        # Background-labelled clips reused as an additive-noise bank. Exclude
+        # test/val hydrophones so held-out recording conditions don't leak in.
+        non_train = self.test_hydros + self.val_hydros
+        return (self.df
+                .filter(pl.col("Labels") == "Background",
+                        ~pl.col("Dataset").is_in(non_train))
+                .get_column("LocalPath")
+                .to_list())
+
+    def _make_train_sampler(self, df):
+        labels = df.get_column("Labels").to_list()
+        counts = df.group_by("Labels").len()
+        count_map = dict(zip(counts.get_column("Labels").to_list(),
+                             counts.get_column("len").to_list()))
+        if self.class_sampling_weights:
+            target = {l: float(self.class_sampling_weights.get(l, 1.0)) for l in count_map}
+        else:
+            target = {l: 1.0 for l in count_map}  # balanced across present classes
+        per_class_w = {l: target[l] / max(count_map[l], 1) for l in count_map}
+        weights = torch.tensor([per_class_w[l] for l in labels], dtype=torch.double)
+        return WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
 
     def val_dataloader(self):
         val_dataloader =  DataLoader(
@@ -190,27 +220,16 @@ class LabelDataModule(L.LightningDataModule):
                    .filter(pl.col('Labels') == 'SRKW')
                    .drop_nulls(pl.col('CalltypeCategory'))
                    .filter(pl.col('CalltypeCategory').is_in(self.calls)))
-        else: # I have to solve this
-            strat_samples = []
-            if self.class_to_balance:
-                pool = df.filter(
-                    ~pl.col("Dataset").is_in(self.test_hydros),
-                    ~pl.col("Dataset").is_in(self.low_sr_hydros),
-                    ~pl.col("Dataset").is_in(self.val_hydros)
-                )
-
-                rest = pool.filter(~pl.col("Labels").is_in(self.class_to_balance.keys()))
-                srkw_time = self.df.filter(pl.col("Labels") == "SRKW")['true_duration'].sum()
-                for c, frac in self.class_to_balance.items():
-                    dur = srkw_time * frac
-                    strat_samples.append(stratified_sampling(c, dur, pool))
-                return pl.concat([rest, *strat_samples]).with_columns(pl.lit("train").alias("split"))
-            else:
-                return df.filter(
+        else: # train
+            # Class balancing is handled at load time by the WeightedRandomSampler
+            # in train_dataloader, not by materialising oversampled rows here.
+            return (df
+                    .filter(
                         ~pl.col("Dataset").is_in(self.test_hydros),
                         ~pl.col("Dataset").is_in(self.low_sr_hydros),
                         ~pl.col("Dataset").is_in(self.val_hydros)
-                )
+                    )
+                    .with_columns(pl.lit("train").alias("split")))
 
     def load_df(self):
 
@@ -254,29 +273,6 @@ class LabelDataModule(L.LightningDataModule):
         return (df
                 .rename({"NewPath": "GCSPath"})
                 .with_columns(local_path.alias("LocalPath")))
-
-
-def stratified_sampling(label:str, tgt_duration:float, df:pl.DataFrame, curr_duration=0, seed=59):
-    seed += 1
-    remaining_duration = tgt_duration - curr_duration
-    if remaining_duration < 300:
-        return df.clear()
-
-    pool = df.filter(pl.col('Labels') == label)
-    duration_per_hydro = remaining_duration / pool['Dataset'].n_unique()
-    cumul_per_hydro = pl.col('true_duration').cum_sum().over('Dataset')
-
-    new_samples = (pool
-                   .sample(fraction=1.0, shuffle=True)
-                   .filter(cumul_per_hydro <= duration_per_hydro))
-
-    added = new_samples['true_duration'].sum()
-
-    if added == 0:
-        return df.clear()
-
-    return pl.concat([new_samples, stratified_sampling(label, tgt_duration, df, curr_duration+added, seed=seed)])
-
 
 
 if __name__ == "__main__":

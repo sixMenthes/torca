@@ -21,6 +21,12 @@ num_calls: 21
 
 class_to_balance: {}
 
+# Desired relative class proportions for the WeightedRandomSampler in the train
+# loader. Values are relative targets, not fractions — HW and TKW are raised
+# above SRKW/Background to oversample them. Omit / set null for balanced
+# (inverse-frequency) sampling across all present classes.
+class_sampling_weights: {Background: 1.0, SRKW: 1.0, HW: 2.0, TKW: 2.0}
+
 mean: -42.456
 std: 15.718
 clip_duration: 5.0
