@@ -7,7 +7,6 @@ import lightning as L
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import datasets
 import copy
 from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import VisionTransformer,PatchEmbed

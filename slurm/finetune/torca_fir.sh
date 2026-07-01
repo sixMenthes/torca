@@ -15,7 +15,7 @@
 # ---------------------------------------------------------------------------
 #SBATCH --account=def-XXXX               # <-- your Alliance allocation (def-/rrg-)
 #SBATCH --job-name=torca_finetune
-#SBATCH --gpus-per-node=h100_3g.40gb:1            # one H100-80GB (Fir's gres type is h100)
+#SBATCH --gpus=h100_3g.40gb:1            # one H100-80GB (Fir's gres type is h100)
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8               # <= 24 (= 1/8 of a 192-core Fir GPU node)
 #SBATCH --mem=60G
