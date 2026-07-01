@@ -1,12 +1,12 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# Torca finetune on the Alliance Canada "Fir" cluster (SFU GP cluster).
+# Torca finetune on the Alliance Canada "Rorqual" cluster.
 # Runs configs/torca.yaml via finetune.py on ONE H100-80GB GPU.
 #
-#   Fir has H100 GPUs, NOT A100 (the Alliance A100 cluster is Narval).
+#   Rorqual has H100 GPUs, NOT A100 (the Alliance A100 cluster is Narval).
 #   H100-80GB strictly dominates an A100 for this job, so we use h100.
 #
-# Compute nodes on Fir have NO internet, so the dataset is NOT downloaded
+# Compute nodes on Rorqual have NO internet, so the dataset is NOT downloaded
 # here. Run slurm/finetune/prestage_torca_data.sh on a LOGIN node first to
 # build the data tarball; this job copies it to node-local $SLURM_TMPDIR,
 # extracts, and trains offline.
@@ -28,11 +28,11 @@
 set -euo pipefail
 
 # ============================== USER SETTINGS ==============================
-PROJECT_ROOT="$HOME/torca"                 # repo root on Fir (has finetune.py)
-OUTPUT_DIR="$HOME/scratch/torca"           # scratch BASE; hydra appends /runs/.../<timestamp>
+PROJECT_ROOT="$HOME/links/projects/def-XXXX/$USER/torca_root/torca"                 # repo root on Fir (has finetune.py)
+OUTPUT_DIR="$HOME/links/projects/def-XXXX/$USER/torca_root/runs"           # scratch BASE; hydra appends /runs/.../<timestamp>
 VENV="$HOME/torca_venv"                                            # prebuilt virtualenv
-CKPT="$HOME/scratch/torca/models/Bird-MAE-B"  # pretrained backbone
-TARBALL="$HOME/scratch/torca/data/dclde_clips.tar" 
+CKPT="$HOME/links/projects/def-XXXX/$USER/torca_root/data/MODELNAME"  # pretrained backbone
+TARBALL="$HOME/links/projects/def-XXXX/$USER/torca_root/data/dclde_clips.tar" 
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"                  # absolute (Hydra chdir=True)
 # ==========================================================================
 

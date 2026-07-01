@@ -18,13 +18,13 @@
 set -euo pipefail
 
 # ============================== USER SETTINGS ==============================
-PROJECT_ROOT="$HOME/projects/def-XXXX/$USER/torca"   # repo root on Fir
+PROJECT_ROOT="$HOME/links/projects/def-XXXX/$USER/torca_root/torca"   # repo root on Fir
 VENV="$HOME/torca_venv"                              # prebuilt virtualenv (needs gcsfs, soundfile, polars)
 STAGE="$SCRATCH/torca_stage"                         # loose-file staging on scratch (1M-inode quota)
-TARBALL="$HOME/projects/def-XXXX/$USER/torca_data/dclde_clips.tar"   # final single-file archive on project
+TARBALL="$HOME/links/projects/def-XXXX/$USER/torca_root/data/dclde_clips.tar"   # final single-file archive on project
 # ==========================================================================
 
-module load StdEnv/2023 python/3.10
+module load StdEnv/2023 python/3.11 gcc arrow/22.0.0
 source "$VENV/bin/activate"
 export PROJECT_ROOT
 export HYDRA_FULL_ERROR=1
