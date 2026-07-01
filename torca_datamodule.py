@@ -19,7 +19,7 @@ log = get_pylogger(__name__)
 
 def collate_fn_skip(batch):
     batch = [b for b in batch if b is not None]
-    return torch.utils.default_collate(batch) if batch else None
+    return torch.utils.data.default_collate(batch) if batch else None
 
 
 class LabelDataModule(L.LightningDataModule):
