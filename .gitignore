@@ -18,3 +18,4 @@ scripts/runs/
 scripts/foundation_model/
 .mlflowvenv
 mlflow.db
+compute_stats.py
