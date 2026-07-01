@@ -1,10 +1,9 @@
 root_dir: ${oc.env:PROJECT_ROOT}
 work_dir: ${hydra:runtime.cwd}
 
+#output
 output_dir: ${hydra:runtime.output_dir}
 
-dataset_dir: /data/DCLDE_birdmae
-log_dir: /mnt/work/bird2vec/logs_pretrain_audioset_MAE/
-model_dir: ${paths.log_dir}/model_checkpoints/
-background_dir: /scratch/birdset/background/wav/
-
+dataset_dir: /data/dclde_no_balance
+model_dir: ${paths.output_dir}/checkpoints/
+log_dir: ${paths.output_dir}/logs/

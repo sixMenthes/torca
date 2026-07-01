@@ -11,8 +11,7 @@ input:
 
 clip_duration: ${data.dataset.clip_duration}
 target_length: 512
-freqm: 0
-timem: 0
+
 
 wave_augmentations:
   shift:                   # offset jitter (non-cyclic, zero-filled time shift)

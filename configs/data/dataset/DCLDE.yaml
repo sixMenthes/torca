@@ -25,9 +25,9 @@ class_to_balance: {}
 # loader. Values are relative targets, not fractions — HW and TKW are raised
 # above SRKW/Background to oversample them. Omit / set null for balanced
 # (inverse-frequency) sampling across all present classes.
-class_sampling_weights: {Background: 1.0, SRKW: 1.0, HW: 2.0, TKW: 2.0}
+#class_sampling_weights: {Background: 1.0, SRKW: 1.0, HW: 2.0, TKW: 2.0}
 
-mean: -42.456
-std: 15.718
+mean: -45.198
+std: 14.855
 clip_duration: 5.0
 target_length: ${data.transform.target_length}

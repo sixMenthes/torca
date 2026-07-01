@@ -2,12 +2,11 @@ root_dir: ${oc.env:PROJECT_ROOT}
 work_dir: ${hydra:runtime.cwd}
 
 #output
-output_dir: ${hydra:runtime.output_dir}
+output_dir: ${hydra:runtime.root_dir}
 
 dataset_dir: /data/dclde_no_balance
 model_dir: ${paths.output_dir}/checkpoints/
-log_dir: ${paths.root_dir}/logs/
-background_dir: ${paths.root_dir}/data/background_noise/
+log_dir: ${paths.output_dir}/logs/
 
 
 

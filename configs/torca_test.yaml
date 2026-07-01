@@ -8,9 +8,9 @@ defaults:
   - override /module/network: vit_base_16.yaml
   - override /module/optimizer: adamw
   - override /module/scheduler: cosine
-  - override /module/loss: asymmetric_loss.yaml
+  - override /module/loss: single_label
   - override /module/metric: birdset_collection #change pls
-  - override /paths: cluster
+  - override /paths: workstation
   - override /trainer: single_gpu
 
 seed: 1

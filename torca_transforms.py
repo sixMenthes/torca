@@ -124,13 +124,6 @@ class BaseTransform:
             n_stft=self.input_params.n_stft)
         self.dbscale_conversion = AmplitudeToDB("power", 80.0)
 
-        self.freqm = None
-        self.timem = None
-
-        if transform_params.freqm:
-            self.freqm = FrequencyMasking(freq_mask_param=self.transform_params.freqm)
-        if transform_params.timem:
-            self.timem = TimeMasking(time_mask_param=self.transform_params.timem)
 
     def __call__(self, waveform):
 
@@ -144,10 +137,6 @@ class BaseTransform:
         waveform = self._process_waveform(waveform)
         fbank = self._compute_spectrogram_features(waveform)
         fbank = self._pad_and_normalize(fbank)
-        if self.freqm:
-            fbank = self.freqm(fbank)
-        if self.timem:
-            fbank = self.timem(fbank)
 
         return ((fbank - self.mean) / (self.std * 2)).permute(0, 2, 1)
 
@@ -243,10 +232,6 @@ class TrainTransform(BaseTransform):
             waveform = self.wave_aug(waveform)
         fbank = self._compute_spectrogram_features(waveform)
         fbank = self._pad_and_normalize(fbank)
-        if self.freqm:
-            fbank = self.freqm(fbank)
-        if self.timem:
-            fbank = self.timem(fbank)
 
         if self.spec_aug:
             fbank = self.spec_aug(fbank)

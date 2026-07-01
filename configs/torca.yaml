@@ -6,13 +6,13 @@ defaults:
   - data/loaders: esc50
   - data/transform: melbank_dclde
   - logger: mlflow
-  - hydra: workstation
+  - hydra: cluster
   - module/network: vit_base_16_dclde
   - module/optimizer: adamw
   - module/scheduler: cosine
   - module/loss: single_label
-  - module/metric: DCLDE #change pls
-  - paths: workstation
+  - module/metric: DCLDE 
+  - paths: cluster
   - trainer: single_gpu
   - experiment: null
   
