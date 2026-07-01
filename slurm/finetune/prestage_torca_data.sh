@@ -36,7 +36,7 @@ cd "$PROJECT_ROOT"
 python - "$STAGE/data" "$PROJECT_ROOT" <<'PY'
 import os, sys
 from hydra import initialize_config_dir, compose
-from torca_datamodule import TorcaDataModule
+from torca_datamodule import LabelDataModule
 
 stage_data_dir, project_root = sys.argv[1], sys.argv[2]
 with initialize_config_dir(version_base=None, config_dir=os.path.join(project_root, "configs")):
@@ -48,7 +48,7 @@ with initialize_config_dir(version_base=None, config_dir=os.path.join(project_ro
         ],
     )
 
-dm = TorcaDataModule(cfg.data.dataset, cfg.data.loaders, cfg.data.transform)
+dm = LabelDataModule(cfg.data.dataset, cfg.data.loaders, cfg.data.transform)
 dm.prepare_data()   # streams clips from GCS, writes <dataset_dir>/<Provider>/<Dataset>/<stem>/<start>-<end>.wav
 print("Download complete:", stage_data_dir)
 PY

@@ -15,10 +15,10 @@
 # ---------------------------------------------------------------------------
 #SBATCH --account=def-XXXX               # <-- your Alliance allocation (def-/rrg-)
 #SBATCH --job-name=torca_finetune
-#SBATCH --gpus-per-node=h100:1           # one H100-80GB (Fir's gres type is h100)
+#SBATCH --gpus-per-node=h100_3g.40gb:1            # one H100-80GB (Fir's gres type is h100)
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16               # <= 24 (= 1/8 of a 192-core Fir GPU node)
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=8               # <= 24 (= 1/8 of a 192-core Fir GPU node)
+#SBATCH --mem=60G
 #SBATCH --time=02:00:00                  # 60 epochs; tune to your measured epoch time
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.out
