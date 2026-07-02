@@ -5,6 +5,7 @@ from util import pylogger
 
 log = pylogger.get_pylogger(__name__)
 
+
 def instantiate_callbacks(cfg_callbacks: DictConfig):
     callbacks = []
 
@@ -48,7 +49,7 @@ def build_model(cfg_module: DictConfig, label_map: dict):
             ema_update_rate=cfg_module.network.ema_update_rate,
             ppnet_cfg=cfg_module.network.ppnet,
             mask_inference=cfg_module.network.mask_inference,
-            label_map=label_map
+            label_map=label_map,
         )
 
     elif cfg_module.network.name == "VIT":
@@ -78,8 +79,8 @@ def build_model(cfg_module: DictConfig, label_map: dict):
             mask_f_prob=cfg_module.network.mask_f_prob,
             ema_update_rate=cfg_module.network.ema_update_rate,
             mask_inference=cfg_module.network.mask_inference,
-            label_map=label_map
-          )
+            label_map=label_map,
+        )
 
     else:
         raise ValueError(f"Model {cfg_module.network.name} not found")
