@@ -58,9 +58,17 @@ mkdir -p logs/slurm
 [ -f "$TARBALL" ] || { echo "ERROR: data tarball not found: $TARBALL  (run prestage_torca_data.sh on a login node)" >&2; exit 1; }
 
 # --- stage data to node-local NVMe (avoids 206k small files on Lustre) ---
-echo "Staging dataset to \$SLURM_TMPDIR ..."
-tar -xf "$TARBALL" -C "$SLURM_TMPDIR"      # extracts a 'data/' tree
+# 
 DATA_DIR="$SLURM_TMPDIR/data"
+if [ -f "$DATA_DIR/.staged_ok" ]; then
+  echo "Dataset already staged, skipping extraction."
+else
+  rm -rf "$DATA_DIR"
+  echo "Staging dataset to \$SLURM_TMPDIR ..."
+  tar -xf "$TARBALL" -C "$SLURM_TMPDIR"      # extracts a 'data/' tree
+  touch "$DATA_DIR/.staged_ok"
+fi
+
 echo "Staged $(find "$DATA_DIR" -name '*.wav' | wc -l) wav files to $DATA_DIR"
 
 # --- run -----------------------------------------------------------------
