@@ -127,7 +127,12 @@ def finetune(cfg: DictConfig):
 
     if cfg.test:
         log.info("Start testing")
-        trainer.test(model=model, datamodule=datamodule, ckpt_path="last")
+        # weights_only=False: our own checkpoint pickles the omegaconf cfg in its
+        # hparams (ListConfig), which PyTorch>=2.6 / Lightning reject by default.
+        # Trusted source (this run just wrote it).
+        trainer.test(
+            model=model, datamodule=datamodule, ckpt_path="last", weights_only=False
+        )
 
         
 if __name__ == "__main__":
