@@ -50,6 +50,7 @@ def build_model(cfg_module: DictConfig, label_map: dict):
             ppnet_cfg=cfg_module.network.ppnet,
             mask_inference=cfg_module.network.mask_inference,
             label_map=label_map,
+            pcen_cfg=cfg_module.network.get("pcen", None),
         )
 
     elif cfg_module.network.name == "VIT":

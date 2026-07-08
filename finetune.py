@@ -83,7 +83,8 @@ def finetune(cfg: DictConfig):
                     param.requires_grad = False
         elif cfg.module.network.name == "VIT_ppnet" or cfg.module.network.name.endswith("ppnet"):
             for name, param in model.named_parameters():
-                if 'ppnet' not in name:
+                # keep ppnet trainable, and the PCEN front-end too when enabled
+                if 'ppnet' not in name and 'pcen' not in name:
                     param.requires_grad = False
         else:
             if cfg.module.network.get("global_pool", "") == "attentive":

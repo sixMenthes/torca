@@ -1,4 +1,5 @@
 
+import math
 from functools import partial
 from omegaconf import OmegaConf
 
@@ -7,6 +8,7 @@ import lightning as L
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import torchaudio.functional as AF
 import copy
 from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import VisionTransformer,PatchEmbed
@@ -24,6 +26,69 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score, GroupKFold
 from sklearn.metrics import make_scorer, f1_score
+
+
+class PCEN(nn.Module):
+    """Trainable Per-Channel Energy Normalization (Wang et al. 2017).
+
+    A learnable front-end that replaces log-mel compression:
+
+        M = ema_s(E)                       # causal per-band AGC (leaky integrator)
+        PCEN = (E / (eps + M)^alpha + delta)^r - delta^r
+
+    It expects LINEAR mel *power* as input, NOT dB. When this layer is enabled
+    the transform (torca_transforms.py) must emit linear mel and skip its
+    AmplitudeToDB + mean/std standardization — PCEN does the compression itself.
+
+    Tensor layout matches the ViT input `(B, C, T, F)`: time on dim -2, mel on
+    dim -1. The smoother runs along T; alpha/delta/r are per-mel (length F) and
+    trained in log-space so they stay positive. The smoother coefficient s and
+    eps are fixed hyperparameters: s is just a low-pass constant PCEN theory
+    doesn't need to learn, and keeping it fixed lets us smooth with torchaudio's
+    C++ IIR `lfilter` (its own differentiable backward) instead of a 512-step
+    python scan that would blow up the autograd graph and activation memory.
+
+    Note: gradients still reach these params through the frozen backbone —
+    `requires_grad=False` on the backbone stops its *updates*, not the backward
+    pass — so no stop-gradient is needed (in fact one would sever PCEN from the
+    loss). But PCEN must be exempted from the freeze loop in finetune.py.
+    """
+
+    def __init__(self, num_bands, s=0.025, eps=1e-6,
+                 alpha=0.98, delta=2.0, r=0.5, trainable=True):
+        super().__init__()
+        self.eps = float(eps)
+        log_alpha = torch.full((num_bands,), math.log(alpha))
+        log_delta = torch.full((num_bands,), math.log(delta))
+        log_r = torch.full((num_bands,), math.log(r))
+        if trainable:
+            self.log_alpha = nn.Parameter(log_alpha)
+            self.log_delta = nn.Parameter(log_delta)
+            self.log_r = nn.Parameter(log_r)
+        else:
+            self.register_buffer("log_alpha", log_alpha)
+            self.register_buffer("log_delta", log_delta)
+            self.register_buffer("log_r", log_r)
+        # First-order IIR EMA  M[t] = (1-s) M[t-1] + s E[t]:
+        #   b = [s, 0],  a = [1, -(1-s)]. Fixed -> registered as buffers.
+        self.register_buffer("_b", torch.tensor([s, 0.0]))
+        self.register_buffer("_a", torch.tensor([1.0, -(1.0 - s)]))
+
+    def _smooth(self, E):
+        # lfilter runs along the last dim, so move time (dim -2) there.
+        x = E.transpose(-1, -2)                       # (B, C, F, T)
+        shape = x.shape
+        x = x.reshape(-1, shape[-1])                  # (N, T)
+        m = AF.lfilter(x, self._a, self._b, clamp=False)
+        return m.reshape(shape).transpose(-1, -2)     # (B, C, T, F)
+
+    def forward(self, E):
+        E = E.clamp_min(0.0)                           # linear power is non-negative
+        M = self._smooth(E)
+        alpha = self.log_alpha.exp()                   # broadcast over mel (last) dim
+        delta = self.log_delta.exp()
+        r = self.log_r.exp()
+        return (E * (self.eps + M).pow(-alpha) + delta).pow(r) - delta.pow(r)
 
 
 class VIT(L.LightningModule,VisionTransformer):
@@ -520,7 +585,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
                  ema_update_rate,
                  ppnet_cfg,
                  mask_inference,
-                 label_map
+                 label_map,
+                 pcen_cfg=None,
     ):
         
         L.LightningModule.__init__(self)
@@ -562,6 +628,21 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
             non_negative_last_layer=ppnet_cfg.non_negative_last_layer,
             embedded_spectrogram_height=ppnet_cfg.embedded_spectrogram_height,
         )
+
+        # Optional trainable PCEN front-end (runs before patch_embed). Enabled
+        # via module.network.pcen.enable; requires data.transform.pcen to feed
+        # linear mel. num_bands = mel bins = img_size_y (last input dim).
+        self.pcen = None
+        if pcen_cfg is not None and pcen_cfg.get("enable", False):
+            self.pcen = PCEN(
+                num_bands=img_size_y,
+                s=pcen_cfg.get("s", 0.025),
+                eps=pcen_cfg.get("eps", 1e-6),
+                alpha=pcen_cfg.get("alpha", 0.98),
+                delta=pcen_cfg.get("delta", 2.0),
+                r=pcen_cfg.get("r", 0.5),
+                trainable=pcen_cfg.get("trainable", True),
+            )
 
     #   for p in model.backbone_model.parameters():
     #     p.requires_grad = False
@@ -645,6 +726,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
     def forward_features(self, x):
         B = x.shape[0]
         #x = x.permute(0,1,3,2) # test!!
+        if self.pcen is not None:
+            x = self.pcen(x)     # linear mel -> PCEN-compressed, in-graph & trainable
         x = self.patch_embed(x) # batch, patch, embed
         x = x + self.pos_embed[:, 1:, :] # strange
         cls_token = self.cls_token + self.pos_embed[:, :1, :]

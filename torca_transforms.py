@@ -114,6 +114,12 @@ class BaseTransform:
         self.std = self.input_params.std
         self.max_length = int(int(self.sampling_rate) * self.clip_duration)
 
+        # When the model uses a trainable PCEN front-end, emit LINEAR mel power
+        # and skip dB compression + mean/std standardization: PCEN (in the model)
+        # does its own compression and must see linear energy. Single switch,
+        # mirrored from module.network.pcen.enable via config interpolation.
+        self.pcen = bool(transform_params.get("pcen", False))
+
         self.spectrogram_conversion = Spectrogram(
             n_fft=self.input_params.n_fft,
             hop_length=self.input_params.hop_length, 
@@ -138,6 +144,8 @@ class BaseTransform:
         fbank = self._compute_spectrogram_features(waveform)
         fbank = self._pad_and_normalize(fbank)
 
+        if self.pcen:
+            return fbank.permute(0, 2, 1)  # linear mel; standardization done by PCEN
         return ((fbank - self.mean) / (self.std * 2)).permute(0, 2, 1)
 
 
@@ -165,8 +173,10 @@ class BaseTransform:
     def _compute_spectrogram_features(self, waveform):
         spec = self.spectrogram_conversion(waveform)
         spec = self.melscale_conversion(spec)
+        if self.pcen:
+            return spec  # linear mel power; PCEN front-end compresses in the model
         fbank_features = self.dbscale_conversion(spec)
-        
+
         return fbank_features #H, W
 
     def _pad_and_normalize(self, fbank_features):
@@ -236,7 +246,8 @@ class TrainTransform(BaseTransform):
         if self.spec_aug:
             fbank = self.spec_aug(fbank)
 
-
+        if self.pcen:
+            return fbank.permute(0, 2, 1)  # linear mel; standardization done by PCEN
         return ((fbank - self.mean) / (self.std * 2)).permute(0, 2, 1)
     
 

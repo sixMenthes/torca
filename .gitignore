@@ -19,3 +19,4 @@ scripts/foundation_model/
 .mlflowvenv
 mlflow.db
 compute_stats.py
+check_pcen.py

@@ -12,6 +12,10 @@ input:
 clip_duration: ${data.dataset.clip_duration}
 target_length: 512
 
+# On -> transform emits LINEAR mel (skips dB + mean/std); the model's PCEN
+# front-end compresses instead. Mirrors module.network.pcen.enable (one switch).
+pcen: ${module.network.pcen.enable}
+
 
 wave_augmentations:
   shift:                   # offset jitter (non-cyclic, zero-filled time shift)

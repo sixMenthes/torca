@@ -24,6 +24,19 @@ freeze_backbone: true
 mask_inference: null
 ema_update_rate: null
 
+# Trainable PCEN front-end (replaces log-mel compression). Single switch:
+# `enable` also drives data.transform.pcen via interpolation, so the transform
+# emits linear mel when this is on. alpha/delta/r are per-mel-band, trained in
+# log-space; s (smoother) and eps are fixed. See PCEN in models/vit/vit.py.
+pcen:
+  enable: false
+  trainable: true
+  s: 0.025
+  eps: 1e-6
+  alpha: 0.98
+  delta: 2.0
+  r: 0.5
+
 
 ppnet: 
   num_prototypes: 420
