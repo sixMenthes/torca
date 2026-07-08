@@ -72,7 +72,7 @@ class LabelDataModule(L.LightningDataModule):
         # cached LocalPaths were written on the prestage node and won't match
         # this node's dataset_dir, whereas self.df was just built (load_df) with
         # the correct paths for this run.
-        cached = Path(self.data_dir) / self.name
+        cached = Path(self.data_dir) / "DCLDE_no_balance"
         if cached.exists():
             ok = pl.read_parquet(cached).get_column("Soundfile")
             self.df = self.df.filter(pl.col("Soundfile").is_in(set(ok)))
