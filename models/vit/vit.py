@@ -728,6 +728,8 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
         #x = x.permute(0,1,3,2) # test!!
         if self.pcen is not None:
             x = self.pcen(x)     # linear mel -> PCEN-compressed, in-graph & trainable
+            if self.training:    # stash output scale to monitor frozen-backbone match
+                self._pcen_act = (x.detach().mean(), x.detach().std())
         x = self.patch_embed(x) # batch, patch, embed
         x = x + self.pos_embed[:, 1:, :] # strange
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
@@ -780,10 +782,31 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
 
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        if self.ema: 
+        if self.ema:
             self.ema.update()
 
         return loss
+
+    def on_before_optimizer_step(self, optimizer):
+        # Monitor the trainable PCEN front-end. Runs after backward / before the
+        # step, so param grads are populated here. Grad norms confirm the learning
+        # signal actually reaches PCEN through the frozen backbone; out_mean/std
+        # track whether PCEN output stays in a range the frozen backbone expects.
+        if self.pcen is None:
+            return
+        with torch.no_grad():
+            for name in ("alpha", "delta", "r"):
+                p = getattr(self.pcen, f"log_{name}").exp()   # interpretable domain
+                self.log(f"pcen/{name}_mean", p.mean(), on_step=False, on_epoch=True)
+                self.log(f"pcen/{name}_std", p.std(), on_step=False, on_epoch=True)
+                g = getattr(self.pcen, f"log_{name}").grad
+                if g is not None:
+                    self.log(f"pcen/{name}_grad_norm", g.norm(),
+                             on_step=True, on_epoch=True)
+            act = getattr(self, "_pcen_act", None)
+            if act is not None:
+                self.log("pcen/out_mean", act[0], on_step=False, on_epoch=True)
+                self.log("pcen/out_std", act[1], on_step=False, on_epoch=True)
 
     def validation_step_0(self, batch, batch_idx):
         audio = batch["audio"]
