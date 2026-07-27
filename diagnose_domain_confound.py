@@ -211,6 +211,35 @@ def scatter_2d(emb2d, labels, title, path):
     plt.close(fig)
 
 
+def load_weights(model, cfg, path):
+    """Load either the raw Bird-MAE backbone or a finetuned VIT_ppnet checkpoint.
+
+    load_pretrained_weights() is for the raw backbone only: it strips encoder
+    prefixes, deletes the head, rebuilds sincos pos_embed, and picks num_patches
+    from a filename heuristic ('Bird-MAE' in path -> 257 else 512). A finetuned
+    ckpt path fails that heuristic (wrong pos_embed size) and shouldn't be
+    reshaped anyway. A finetuned checkpoint already carries the correct
+    pos_embed + trained ppnet/pcen, so load it straight onto the built model.
+    """
+    blob = torch.load(path, map_location="cpu", weights_only=False)
+    sd = blob.get("state_dict") if isinstance(blob, dict) else None
+    sd = sd or (blob.get("model") if isinstance(blob, dict) else None) or blob
+    finetuned = any(("ppnet" in k) or k.startswith("pcen.") for k in sd)
+    if finetuned:
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        n_ppnet = sum("ppnet" in k for k in sd)
+        n_pcen = sum(k.startswith("pcen.") for k in sd)
+        print(f"[info] finetuned checkpoint loaded directly: {n_ppnet} ppnet + "
+              f"{n_pcen} pcen tensors; {len(missing)} missing / "
+              f"{len(unexpected)} unexpected keys")
+        if n_pcen == 0 and bool(cfg.module.network.get("pcen", {}).get("enable", False)):
+            print("[warn] PCEN enabled but checkpoint has no pcen.* tensors -- "
+                  "front-end will be UNTRAINED.")
+    else:
+        print("[info] raw backbone: using load_pretrained_weights")
+        model.load_pretrained_weights(path, cfg.data.dataset.name)
+
+
 def project_2d(X):
     try:
         import umap
@@ -288,8 +317,8 @@ def main():
     model = build_model(cfg.module, dm.label_map)
     wpath = cfg.module.network.get("pretrained_weights_path", None)
     if wpath:
-        print(f"[info] loading pretrained weights: {wpath}")
-        model.load_pretrained_weights(wpath, cfg.data.dataset.name)
+        print(f"[info] loading weights: {wpath}")
+        load_weights(model, cfg, wpath)
     model.to(device).eval()
 
     # --- embed ---------------------------------------------------------------
