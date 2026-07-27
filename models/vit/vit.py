@@ -771,7 +771,56 @@ class VIT_ppnet(L.LightningModule,VisionTransformer):
 
     def forward(self, x):
         logits, activations = self.forward_features(x)
-        return logits, activations 
+        return logits, activations
+
+
+    @torch.no_grad()
+    def embed(self, x):
+        """Backbone embedding for the domain-confound diagnostic.
+
+        Runs the exact encoder path as forward_features (PCEN -> patch_embed ->
+        blocks -> self.norm) but stops before the prototype layer, returning
+        fixed-length (B, embed_dim) vectors instead of logits. Three views, one
+        forward pass:
+
+          focal      : mean over patches of (patch - cls), i.e. the pooled
+                       focal-similarity grid the prototypes actually compare
+                       against when ppnet_cfg.focal_similarity is True. This is
+                       the faithful "what the head sees" summary.
+          patch_mean : mean of the post-norm patch tokens. This is what the
+                       prototypes see when focal_similarity is False, and doubles
+                       as the plain global-pool baseline.
+          cls        : post-norm CLS token (the focal reference).
+
+        Pooling collapses the 8xT spatial grid, so it discards the per-location
+        structure ppnet exploits at match time -- fine for a per-clip clustering
+        probe, not a substitute for the prototype similarities themselves.
+
+        Deterministic: forces eval so DropPath/pos_drop are identity, then
+        restores the prior mode. No masking (forward_features has none either).
+        """
+        was_training = self.training
+        self.eval()
+        try:
+            B = x.shape[0]
+            if self.pcen is not None:
+                x = self.pcen(x)
+            x = self.patch_embed(x)
+            x = x + self.pos_embed[:, 1:, :]
+            cls_tokens = (self.cls_token + self.pos_embed[:, :1, :]).expand(B, -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
+            x = self.pos_drop(x)
+            for blk in self.blocks:
+                x = blk(x)
+            x = self.norm(x)
+
+            cls = x[:, 0]
+            patch = x[:, 1:, :]
+            focal = (patch - cls.unsqueeze(1)).mean(dim=1)
+            return {"focal": focal, "patch_mean": patch.mean(dim=1), "cls": cls}
+        finally:
+            if was_training:
+                self.train()
 
 
     def training_step(self, batch, batch_idx):
