@@ -83,12 +83,21 @@ class PCEN(nn.Module):
         return m.reshape(shape).transpose(-1, -2)     # (B, C, T, F)
 
     def forward(self, E):
-        E = E.clamp_min(0.0)                           # linear power is non-negative
-        M = self._smooth(E)
-        alpha = self.log_alpha.exp()                   # broadcast over mel (last) dim
-        delta = self.log_delta.exp()
-        r = self.log_r.exp()
-        return (E * (self.eps + M).pow(-alpha) + delta).pow(r) - delta.pow(r)
+        # Run the whole front-end in float32 with autocast disabled, then cast
+        # back to the incoming dtype for the (autocast) backbone. Two reasons:
+        # (1) lfilter's C++ kernel only accepts float32/64, so under bf16/fp16
+        # AMP (E arrives half-precision) it would raise; (2) the recursive IIR
+        # smoother and the power-law compression are numerically fragile in
+        # half precision. fp32 here costs almost nothing (tiny front-end).
+        in_dtype = E.dtype
+        with torch.autocast(device_type=E.device.type, enabled=False):
+            E = E.float().clamp_min(0.0)               # linear power is non-negative
+            M = self._smooth(E)
+            alpha = self.log_alpha.exp()               # broadcast over mel (last) dim
+            delta = self.log_delta.exp()
+            r = self.log_r.exp()
+            out = (E * (self.eps + M).pow(-alpha) + delta).pow(r) - delta.pow(r)
+        return out.to(in_dtype)
 
 
 class VIT(L.LightningModule,VisionTransformer):

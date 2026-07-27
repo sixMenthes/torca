@@ -1,0 +1,39 @@
+# @package _global_
+#
+# DCLDE SRKW finetune WITH the trainable PCEN front-end enabled.
+#
+# The base config (configs/torca.yaml) already composes the DCLDE pieces:
+#   data/dataset: DCLDE, data/transform: melbank_dclde, module/network:
+#   vit_base_16_dclde (VIT_ppnet, which owns the PCEN block). So this experiment
+#   only has to flip the single PCEN switch — `module.network.pcen.enable`. The
+#   transform's `pcen` flag is interpolated from it (melbank_dclde.yaml:17), so
+#   turning it on here also makes the transform emit LINEAR mel (skips dB +
+#   mean/std standardization); PCEN does the compression in-graph.
+#
+# Launch:
+#   python finetune.py +experiment=finetune_examples/finetune_dclde_pcen
+#
+defaults: []
+
+task_name: "finetune_dclde_pcen"
+
+logger:
+  experiment_name: dclde_pcen
+
+module:
+  network:
+    pcen:
+      enable: true
+      trainable: true      # learn per-mel alpha/delta/r in log-space
+      # s is NOT learned — the one knob to sweep by hand. At torca's frame rate
+      # (hop 320 @ 32 kHz = 100 fps) the EMA time-constant is tau ~= 1/s frames:
+      #   s=0.025 -> tau ~= 0.4 s   (default; reasonable AGC scale for orca)
+      #   s=0.05  -> tau ~= 0.2 s
+      #   s=0.01  -> tau ~= 1.0 s
+      # NB: the "s=0.33" figure in the paper notes is at Lostanlen's frame rate,
+      # which is much lower than 100 fps — do NOT copy it here (tau ~= 30 ms).
+      s: 0.025
+      eps: 1e-6
+      alpha: 0.98          # per-mel init; trained
+      delta: 2.0
+      r: 0.5
