@@ -1,0 +1,23 @@
+# @package _global_
+# FSQNet: BEATs->FSQ masked+classification model on a local DCLDE manifest.
+# FSQNet is self-contained (own composite loss, optimizer, scheduler, metric),
+# so no module/loss, module/metric, or data/transform groups are composed.
+defaults:
+  - _self_
+  - callbacks: default_ssl
+  - data/dataset: dclde_local
+  - data/loaders: default
+  - logger: mlflow
+  - hydra: workstation
+  - module/network: fsqnet
+  - paths: workstation
+  - trainer: single_gpu
+  - experiment: null
+
+seed: 59
+
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "train_fsqnet"
+
+train: true
+test: false

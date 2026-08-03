@@ -1,0 +1,13 @@
+# Pre-built local manifest for FSQNet (raw-waveform, not spectrogram).
+# The manifest parquet must already exist (download/preprocess done upstream)
+# and carry columns: clip_path, Labels, FileBeginSec, FileEndSec, and a split
+# column (default "Split") with values train/val/test.
+parquet_path: /home/tundra/projects/torca/ds/DCLDE_train_manifest.parquet
+name: dclde_local
+
+labels: ['Background', 'HW', 'SRKW', 'TKW']
+num_classes: 4
+
+clip_duration: 3.0
+sample_rate: 16000
+split_column: Split

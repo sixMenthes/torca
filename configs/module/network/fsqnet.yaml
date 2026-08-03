@@ -1,0 +1,34 @@
+name: FSQNet
+
+# data / patch grid
+num_mel_bins: 128
+patch_size: 16
+time_step: 10
+chunk_duration: 3.0
+num_classes: ${data.dataset.num_classes}
+
+# model
+d_model: 256
+num_heads: 4
+d_ff: 512
+num_layers: 2
+dropout: 0.1
+fsq_levels: [8, 6, 6]
+
+# masking
+mask_prob: 0.15
+span_len: 3
+
+# loss weights
+class_loss_weight: 1.0
+diversity_loss_weight: 0.1   # tweakable; see torca_notes/fsq_hydra_port_plan.md
+
+# optim (configure_optimizers builds AdamW + CosineWarmupScheduler from these)
+lr: 3e-4
+betas: [0.9, 0.98]
+eps: 1e-9
+weight_decay: 0.0
+warmup_ratio: 0.05
+
+# frozen BEATs checkpoint
+beats_ckpt: /home/tundra/projects/torca/models/BEATs_iter3.pt
