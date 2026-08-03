@@ -1,6 +1,7 @@
 import warnings
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchcodec.decoders import AudioDecoder
 
@@ -9,18 +10,28 @@ warnings.filterwarnings("ignore", message=".*has been deprecated.*")
 
 class LocalDataset(Dataset):
     """
-    Reads a pre-built manifest (polars df) of local audio clips and returns raw
-    waveform + integer label. BEATs computes its own fbank, so no spectrogram
-    transform happens here.
+    Reads pre-sliced local audio clips (one file per annotation, cut and centered
+    on the annotation by LabelDataModule) and returns a raw waveform + integer
+    label. The clip is decoded, resampled to `sample_rate`, and center-cropped or
+    symmetrically padded to `clip_duration` seconds. BEATs computes its own fbank,
+    so no spectrogram transform happens here.
 
-    Expected columns: clip_path, Labels, FileBeginSec, FileEndSec.
+    Because the source clips are centered on the annotation, center-cropping keeps
+    the call centered when `clip_duration` (e.g. 3 s) is shorter than the source
+    clip (e.g. 5 s). Set `clip_duration` equal to the source length to use the
+    whole clip. (Edge annotations near a file boundary were cut off-center by
+    LabelDataModule, so center-crop is approximate there.)
+
+    Expected columns: clip_path, Labels.
     """
 
-    def __init__(self, polars_df, label_map=None, clip_duration=3.0, sample_rate=16000, fmin=0):
+    def __init__(self, polars_df, label_map=None, clip_duration=3.0, sample_rate=16000):
         super().__init__()
         self.df = polars_df
         self.labels = self.df.get_column("Labels")
-        self.params = {"clipDur": clip_duration, "outSR": sample_rate, "fmin": fmin}
+        self.clip_duration = clip_duration
+        self.sample_rate = sample_rate
+        self.target_samples = int(clip_duration * sample_rate)
         unique_labels = self.labels.unique().to_list()
         if not label_map:
             self.label_map = {name: i for i, name in enumerate(unique_labels)}
@@ -32,33 +43,26 @@ class LocalDataset(Dataset):
 
     def __getitem__(self, idx):
         audio_path = self.df["clip_path"][idx]
-        decoder = AudioDecoder(audio_path, sample_rate=self.params["outSR"])
-        metadata = decoder.metadata
-        start_time, end_time = self.get_start(metadata, idx)
-        audio_data = decoder.get_samples_played_in_range(start_time, end_time).data
-        audio_data = audio_data[0]
-        target_samples = int(self.params["clipDur"] * self.params["outSR"])
-        if audio_data.shape[-1] < target_samples:
-            pad = target_samples - audio_data.shape[-1]
-            audio_data = torch.nn.functional.pad(audio_data, (0, pad))
-        elif audio_data.shape[-1] > target_samples:
-            audio_data = audio_data[..., :target_samples]
-
+        decoder = AudioDecoder(audio_path, sample_rate=self.sample_rate)
+        duration = decoder.metadata.duration_seconds
+        audio_data = decoder.get_samples_played_in_range(0, duration).data
+        audio_data = audio_data[0]  # mono: first channel
+        audio_data = self._center_fit(audio_data, self.target_samples)
         label = torch.tensor(self.label_map[self.labels[idx]], dtype=torch.long)
         return audio_data, label
 
-    def get_start(self, metadata, idx):
-        start_time = self.df["FileBeginSec"][idx]
-        end_time = self.df["FileEndSec"][idx]
-        file_duration = metadata.duration_seconds
-        duration = end_time - start_time
-        center_time = start_time + duration / 2.0
-        new_start_time = max(0, center_time - (self.params["clipDur"] / 2.0))
-        new_end_time = new_start_time + self.params["clipDur"]
-        if new_end_time > file_duration:
-            new_start_time = max(0, file_duration - self.params["clipDur"])
-            new_end_time = file_duration
-        return (new_start_time, new_end_time)
+    @staticmethod
+    def _center_fit(audio, target):
+        n = audio.shape[-1]
+        if n == target:
+            return audio
+        if n > target:  # center crop
+            start = (n - target) // 2
+            return audio[start:start + target]
+        # symmetric pad to keep the annotation centered
+        total = target - n
+        left = total // 2
+        return F.pad(audio, (left, total - left))
 
 
 def collate_fn(batch):

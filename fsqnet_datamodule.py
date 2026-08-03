@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import lightning as L
 import polars as pl
@@ -13,23 +15,26 @@ log = get_pylogger(__name__)
 
 class LocalDataModule(L.LightningDataModule):
     """
-    FSQNet datamodule aligned to the augmentations DCLDE parquet + hydrophone split
-    (Option B) so FSQNet trains on the SAME data and splits as the VIT/LabelDataModule
-    path and stays comparable to it.
+    FSQNet datamodule that consumes the SAME pre-sliced DCLDE clips and the SAME
+    hydrophone split as the augmentations/LabelDataModule path, for apples-to-apples
+    comparability -- and, crucially, without needing the full 1.5 TiB dataset on
+    disk (only the small per-annotation clips), which suits the Alliance/rorqual
+    cluster.
 
-    Reads the raw annotation parquet (e.g. DCLDE_w_Buzzes.parquet), filters to the
-    configured labels, maps each annotation's GCS `NewPath` to a LOCAL full-soundfile
-    path (mirror rooted at `data_dir`), and splits by hydrophone (`Dataset`):
-    test/val hydrophones are held out and low-SR hydrophones are excluded from train,
-    matching LabelDataModule.build_set. `LocalDataset` then trims a `chunk_duration`
-    window around [FileBeginSec, FileEndSec] and resamples to `sample_rate` on decode.
-    Yields raw-waveform batches `(padded, mask, labels)`; exposes `label_map` and
-    inverse-frequency `class_weights` (from the train split).
+    Reads the raw annotation parquet, filters to the configured labels, and rebuilds
+    each clip's local path with the EXACT scheme LabelDataModule.load_df used to
+    write them:
 
-    ASSUMES full soundfiles are mirrored locally under `data_dir` (e.g. via
-    fsq/download_preprocess.py: local = data_dir / NewPath.removeprefix(gs_root)).
-    If instead you have per-clip pre-sliced wavs, this mapping and LocalDataset's
-    range-trim are wrong -- point clip_path at the clips and load them whole.
+        {data_dir}/{Provider}/{Dataset}/{stem}/{start_ms}-{end_ms}.wav
+
+    where the window is `slice_duration` seconds centered on the annotation
+    (start_ms/end_ms are zero-padded ms of new_start/new_end). `slice_duration`
+    MUST equal the clip_duration the clips were cut at (VIT used 5.0). Splits by
+    hydrophone (`Dataset`): test/val held out, low-SR excluded from train. The clip
+    is center-cropped to the network's `chunk_duration` in LocalDataset.
+
+    If `drop_missing_clips`, rows whose file is absent are dropped at init (also a
+    sanity check that the path scheme / data_dir match what's on disk).
     """
 
     def __init__(
@@ -47,7 +52,8 @@ class LocalDataModule(L.LightningDataModule):
         self.chunk_duration = dc.get("chunk_duration", 3.0)
         self.sample_rate = dc.get("sample_rate", 16000)
         self.data_dir = str(dc.data_dir).rstrip("/")
-        self.gs_root = dc.gs_root
+        self.slice_duration = dc.slice_duration
+        self.drop_missing_clips = dc.get("drop_missing_clips", True)
 
         self.test_hydros = list(dc.test_hydros)
         self.val_hydros = list(dc.val_hydros)
@@ -66,12 +72,37 @@ class LocalDataModule(L.LightningDataModule):
         if "NewFileOk" in df.columns:
             df = df.filter(pl.col("NewFileOk"))
         df = df.filter(pl.col("Labels").is_in(self.labels))
+
+        # Rebuild LabelDataModule.load_df's LocalPath (must match on-disk clips).
+        duration = pl.col("FileEndSec") - pl.col("FileBeginSec")
+        center_time = pl.col("FileBeginSec") + duration / 2.0
+        new_start = pl.max_horizontal(pl.lit(0.0), center_time - self.slice_duration / 2.0)
+        new_end = new_start + self.slice_duration
+        stem = pl.col("Soundfile").str.replace(r"\.[^.]+$", "")
+        start_ms = (new_start * 1000).round().cast(pl.Int64).cast(pl.String).str.zfill(10)
+        end_ms = (new_end * 1000).round().cast(pl.Int64).cast(pl.String).str.zfill(10)
         clip_path = pl.format(
-            "{}/{}",
+            "{}/{}/{}/{}/{}-{}.wav",
             pl.lit(self.data_dir),
-            pl.col("NewPath").str.strip_prefix(self.gs_root),
+            pl.col("Provider"),
+            pl.col("Dataset"),
+            stem,
+            start_ms,
+            end_ms,
         )
-        return df.with_columns(clip_path.alias("clip_path"))
+        df = df.with_columns(clip_path.alias("clip_path"))
+
+        if self.drop_missing_clips:
+            n_before = df.height
+            exists = [os.path.exists(p) for p in df.get_column("clip_path").to_list()]
+            df = df.filter(pl.Series(exists))
+            log.info(f"clips on disk: {df.height}/{n_before} (dropped {n_before - df.height} missing)")
+            if df.height == 0:
+                raise RuntimeError(
+                    "No clips found on disk. Check data_dir, slice_duration, and that "
+                    "the path scheme matches how the clips were written."
+                )
+        return df
 
     def _split_df(self, split: str) -> pl.DataFrame:
         if split == "test":

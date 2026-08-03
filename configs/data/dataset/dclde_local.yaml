@@ -1,23 +1,30 @@
-# FSQNet dataset config (Option B): same raw DCLDE parquet + hydrophone split as
-# the augmentations/LabelDataModule path, for apples-to-apples comparability.
-# LocalDataModule maps each annotation's GCS NewPath to a LOCAL full-soundfile
-# mirror under data_dir, then trims [FileBeginSec, FileEndSec] per clip.
-# Requires columns: Dataset, Labels, NewPath, FileBeginSec, FileEndSec (+ optional NewFileOk).
+# FSQNet dataset config: consumes the SAME pre-sliced DCLDE clips + SAME hydrophone
+# split as the augmentations/LabelDataModule path (comparable, and no need for the
+# full ~1.5 TiB dataset -- only the small per-annotation clips, which fits rorqual).
+# LocalDataModule rebuilds each clip's path with LabelDataModule's scheme:
+#   {data_dir}/{Provider}/{Dataset}/{stem}/{start_ms}-{end_ms}.wav
+# Requires parquet columns: Provider, Dataset, Soundfile, Labels, FileBeginSec,
+# FileEndSec (+ optional NewFileOk).
 parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
 name: dclde_local
 
-# local mirror of the GCS bucket (full soundfiles), e.g. from fsq/download_preprocess.py
-data_dir: /mnt/data/dclde_2027_killer_whales
-gs_root: "gs://noaa-passive-bioacoustic/dclde/2027/dclde_2027_killer_whales/"
+# root holding the pre-sliced clips (set for the target machine, e.g. rorqual scratch)
+data_dir: /home/tundra/projects/torca/ds/clips
+# duration the clips were CUT at (VIT used 5.0). Must match on-disk filenames.
+slice_duration: 5.0
+drop_missing_clips: true
 
 labels: ['Background', 'HW', 'SRKW', 'TKW']
 num_classes: 4
 
-chunk_duration: 3.0
+# single source of truth: the window FSQNet actually consumes = the network's grid.
+# LocalDataset center-crops each clip to this. Set == slice_duration (5.0) to use the
+# whole clip / match VIT's temporal extent; keep shorter (e.g. 3.0) to tighten on the call.
+chunk_duration: ${module.network.chunk_duration}
 sample_rate: 16000
 
-# hydrophone-based split (mirrors LabelDataModule). Align these to the canonical
-# DCLDE split before real runs (test = orcasound_lab + LimeKiln, etc.).
+# hydrophone-based split (mirrors LabelDataModule). Align to the canonical DCLDE
+# split before real runs (test = orcasound_lab + LimeKiln, etc.).
 test_hydros: ["StraitofGeorgia", "StrGeoS1"]
 val_hydros: ["CarmanahPt"]
 low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab', 'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
