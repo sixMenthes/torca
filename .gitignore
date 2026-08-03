@@ -1,7 +1,7 @@
 runs/
 logs/
 .venv/
-data/
+/data/
 inspect_weights.py
 pretrained/
 .DS_Store

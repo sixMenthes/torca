@@ -1,13 +1,23 @@
-# Pre-built local manifest for FSQNet (raw-waveform, not spectrogram).
-# The manifest parquet must already exist (download/preprocess done upstream)
-# and carry columns: clip_path, Labels, FileBeginSec, FileEndSec, and a split
-# column (default "Split") with values train/val/test.
-parquet_path: /home/tundra/projects/torca/ds/DCLDE_train_manifest.parquet
+# FSQNet dataset config (Option B): same raw DCLDE parquet + hydrophone split as
+# the augmentations/LabelDataModule path, for apples-to-apples comparability.
+# LocalDataModule maps each annotation's GCS NewPath to a LOCAL full-soundfile
+# mirror under data_dir, then trims [FileBeginSec, FileEndSec] per clip.
+# Requires columns: Dataset, Labels, NewPath, FileBeginSec, FileEndSec (+ optional NewFileOk).
+parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
 name: dclde_local
+
+# local mirror of the GCS bucket (full soundfiles), e.g. from fsq/download_preprocess.py
+data_dir: /mnt/data/dclde_2027_killer_whales
+gs_root: "gs://noaa-passive-bioacoustic/dclde/2027/dclde_2027_killer_whales/"
 
 labels: ['Background', 'HW', 'SRKW', 'TKW']
 num_classes: 4
 
-clip_duration: 3.0
+chunk_duration: 3.0
 sample_rate: 16000
-split_column: Split
+
+# hydrophone-based split (mirrors LabelDataModule). Align these to the canonical
+# DCLDE split before real runs (test = orcasound_lab + LimeKiln, etc.).
+test_hydros: ["StraitofGeorgia", "StrGeoS1"]
+val_hydros: ["CarmanahPt"]
+low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab', 'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
