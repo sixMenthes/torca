@@ -1,6 +1,7 @@
 import hydra
 from omegaconf import DictConfig
 from models.vit.vit import VIT_ppnet, VIT
+from models.fsqnet import FSQNet
 from util import pylogger
 
 log = pylogger.get_pylogger(__name__)
@@ -19,7 +20,35 @@ def instantiate_callbacks(cfg_callbacks: DictConfig):
     return callbacks
 
 
-def build_model(cfg_module: DictConfig, label_map: dict):
+def build_model(cfg_module: DictConfig, label_map: dict, class_weights=None):
+
+    if cfg_module.network.name == "FSQNet":
+        net = cfg_module.network
+        return FSQNet(
+            num_mel_bins=net.num_mel_bins,
+            patch_size=net.patch_size,
+            time_step=net.time_step,
+            chunk_duration=net.chunk_duration,
+            num_classes=net.num_classes,
+            d_model=net.d_model,
+            num_heads=net.num_heads,
+            d_ff=net.d_ff,
+            num_layers=net.num_layers,
+            dropout=net.dropout,
+            fsq_levels=net.fsq_levels,
+            mask_prob=net.mask_prob,
+            span_len=net.span_len,
+            class_loss_weight=net.class_loss_weight,
+            diversity_loss_weight=net.diversity_loss_weight,
+            lr=net.lr,
+            betas=net.betas,
+            eps=net.eps,
+            weight_decay=net.weight_decay,
+            warmup_ratio=net.warmup_ratio,
+            beats_ckpt=net.beats_ckpt,
+            class_weights=class_weights,
+            label_map=label_map,
+        )
 
     if cfg_module.network.name == "VIT_ppnet":
         module = VIT_ppnet(
