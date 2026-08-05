@@ -1,7 +1,69 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchaudio.compliance.kaldi as ta_kaldi
 from torchaudio.compliance.kaldi import fbank
+
+
+def make_frontend(model_name, sample_rate=None, target_length=None, **kwargs):
+    """Front-end for a backbone by name. Used by the DATASET, not the model.
+
+    The two backbones need genuinely different fbanks — see the class docstrings —
+    so the dataset has to know which backbone it is feeding. That is what the
+    `model_name` field in the dataset config carries.
+
+    `target_length` is deliberately ignored for BEATs: it has no fixed input length,
+    so its frame count simply follows the clip, and padding to a target would change
+    what the pretrained model was given.
+    """
+    if model_name == "BEATs":
+        return BEATsFbank(sample_frequency=sample_rate or 16000, **kwargs)
+    if model_name == "BirdMAE":
+        if target_length is not None:
+            kwargs["target_length"] = target_length
+        return KaldiFbank(sample_frequency=sample_rate or 32000, **kwargs)
+    raise ValueError(f"unknown model_name {model_name!r} (BEATs | BirdMAE)")
+
+
+class BEATsFbank(nn.Module):
+    """BEATs' own front-end, lifted out of `BEATs.preprocess` so it can run in the
+    dataloader workers instead of serially in the training loop.
+
+    Must stay bit-identical to `BEATs.preprocess`, since the checkpoint was
+    pretrained on exactly this. Differs from Bird-MAE's `KaldiFbank` in ways that
+    matter: the waveform is scaled by 2**15 and NOT mean-subtracted, kaldi window
+    defaults are used (no hanning, no htk_compat), and normalisation uses BEATs'
+    own constants. There is also no target_length padding — BEATs has no fixed
+    input length, so the frame count follows the clip.
+
+    Input : (T,) or (1, T) waveform at 16 kHz.
+    Output: (1, frames, num_mel_bins), matching KaldiFbank's channel-first layout.
+    """
+
+    def __init__(self, sample_frequency=16000, num_mel_bins=128,
+                 frame_length=25, frame_shift=10,
+                 mean=15.41663, std=6.55582):
+        super().__init__()
+        self.sample_frequency = sample_frequency
+        self.num_mel_bins = num_mel_bins
+        self.frame_length = frame_length
+        self.frame_shift = frame_shift
+        self.mean = mean
+        self.std = std
+
+    @torch.no_grad()
+    def forward(self, wave):
+        if wave.dim() == 1:
+            wave = wave.unsqueeze(0)
+        fb = ta_kaldi.fbank(
+            wave * 2 ** 15,
+            num_mel_bins=self.num_mel_bins,
+            sample_frequency=self.sample_frequency,
+            frame_length=self.frame_length,
+            frame_shift=self.frame_shift,
+        )
+        fb = (fb - self.mean) / (2 * self.std)
+        return fb.unsqueeze(0)
 
 
 class KaldiFbank(nn.Module):
@@ -63,7 +125,19 @@ class KaldiFbank(nn.Module):
         return fb
 
     def forward(self, wave):
-        if wave.dim() == 3:                    # (B, 1, T) -> (B, T)
+        """1-D (T,) -> (1, target_length, mel);  batched -> (B, 1, target_length, mel).
+
+        The 1-D form is the per-sample path used by SelfDistillDataset, so this runs
+        in the dataloader WORKERS, in parallel. That matters: kaldi's fbank is not
+        batched, so the batched path below is a serial Python loop (~1.9 ms/sample,
+        measured to scale 15.14x from batch 1 to 16) executed twice per training step
+        for the teacher and student views — cheap next to a CPU forward, but dominant
+        next to an H100 one.
+        """
+        single = wave.dim() == 1
+        if single:
+            wave = wave.unsqueeze(0)
+        elif wave.dim() == 3:                   # (B, 1, T) -> (B, T)
             wave = wave.squeeze(1)
         feats = []
         for w in wave:                          # kaldi fbank is not batched (per-sample)
@@ -83,4 +157,4 @@ class KaldiFbank(nn.Module):
             feats.append(self._fit_time(fb))
         x = torch.stack(feats, dim=0)           # (B, target_length, mel)
         x = (x - self.mean) / (self.std * 2.0)
-        return x.unsqueeze(1)                    # (B, 1, target_length, mel)
+        return x if single else x.unsqueeze(1)

@@ -9,8 +9,12 @@
 # silently ignored (adamw.yaml's lr=1e-3 instead of the 1e-4 this task wants).
 defaults:
   - callbacks: selfdistill
-  - data/dataset: dclde_selfdistill
-  - data/loaders: default
+  # Per-backbone because the dataset now applies the fbank, and the two backbones need
+  # different ones. Swap BOTH this and module/network together — the datamodule raises
+  # if their sample rates disagree.
+  - data/dataset: dclde_selfdistill_birdmae
+  # NOT default: that one is num_workers=1, batch_size=1 (debug values)
+  - data/loaders: selfdistill
   - data/transform: ssl_fbank_dclde
   - logger: mlflow
   - hydra: workstation
@@ -20,6 +24,14 @@ defaults:
   - trainer: single_gpu
   - experiment: null
   - _self_
+
+# One MLflow experiment per ablation cell. The shared logger/mlflow.yaml still says
+# "Finetune with no pre-training", which would dump every self-distillation run into the
+# finetune experiment; overriding here rather than editing the shared file keeps the
+# finetune runs untouched. task_name is set per arm by slurm/selfdistill/selfdistill.sh
+# (selfdistill_birdmae / selfdistill_beats / selfdistill_birdmae_nobg).
+logger:
+  experiment_name: ${task_name}
 
 # Select checkpoints on the held-out recording condition rather than just keeping the
 # latest epoch. val/loss is the same objective computed on CarmanahPt, which the model

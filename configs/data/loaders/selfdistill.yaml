@@ -1,0 +1,32 @@
+# Loader settings for the self-distillation runs. The shared default.yaml is set to
+# num_workers=1, batch_size=1 (debug values), which would be catastrophic here.
+#
+# num_workers matters more than usual now that the fbank front-end runs in the
+# WORKERS rather than the model: worker count is what parallelises it. The slurm
+# script overrides this from $SLURM_CPUS_PER_TASK so it tracks whatever GPU instance
+# was requested; this value is the workstation default.
+#
+# Nibi bundles cores in a FIXED ratio to GPU (1.15 cores per RGU), so a bigger GPU
+# brings proportionally more cores — 6 cores for a 3g.40gb slice, 14 for a full H100.
+# The useful consequence: scaling the GPU up does NOT fix a dataloader bottleneck,
+# because both sides scale together. If the loader is the limit, make the per-sample
+# CPU work cheaper instead.
+train:
+  num_workers: 5          # leave one core for the main process
+  batch_size: 32
+  shuffle: true
+  drop_last: true
+  persistent_workers: true
+  pin_memory: true
+
+val:
+  num_workers: 2
+  batch_size: 32
+  shuffle: false
+  persistent_workers: true
+  pin_memory: true
+
+test:
+  num_workers: 2
+  batch_size: 32
+  shuffle: false

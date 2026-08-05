@@ -1,0 +1,46 @@
+# DCLDE split for the self-distillation domain-adaptation study.
+# Finalized 2026-08-04. Differs from DCLDE.yaml (the finetune split) only in:
+#   - test_hydros: StrGeoS1 swapped OUT (moved to train), BarkleyCanyon swapped IN
+#     (ONC, unique provider => leak-free, carries all 4 ecotype classes incl TKW).
+#   - clip_duration 5.0 -> 3.0 (tighter on call); pair with transform target_length=304.
+# StrGeo* stay in TRAIN: with StrGeoS1 out of test, StraitofGeorgia (JASCO) vs
+# StrGeo* (DFO_WDA) are different instrument/depth/time = different recording chains.
+parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
+dataset_dir: ${paths.dataset_dir}
+name: DCLDE_selfdistill_beats
+
+# See dclde_selfdistill_birdmae.yaml for why this lives in the dataset config.
+# BEATs' front-end scales the waveform by 2**15, does NOT mean-subtract, uses kaldi
+# window defaults, and does no target_length padding — its frame count follows the
+# clip. Requires sample_rate 16000, which the datamodule verifies.
+model_name: BEATs
+
+num_workers: 4
+
+# Cache manifest written by prestage_clips.py and read by prepare_data. Named per
+# clip_duration on purpose: clips are {start_ms}-{end_ms}.wav, so a 5s stage and a
+# 3s stage share no files — a shared manifest name would let one masquerade as the
+# other and the run would train on empty batches without erroring.
+manifest_name: DCLDE_3secs.parquet
+
+columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath']
+
+test_hydros: ["StraitofGeorgia", "BarkleyCanyon"]
+
+val_hydros: ["CarmanahPt"]
+
+low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab', 'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
+
+labels: ['Background', 'HW', 'SRKW', 'TKW']
+num_classes: 4
+
+calls: ['S42', 'S03', 'S10', 'S44', 'S05', 'S06', 'S14', 'S18', 'S12', 'S19', 'S13', 'S04', 'S17', 'S41', 'S02', 'S01', 'S07', 'S08', 'S36', 'S16', 'S37']
+
+num_calls: 21
+
+class_to_balance: {}
+
+mean: -45.198
+std: 14.855
+clip_duration: 3.0
+target_length: ${data.transform.target_length}

@@ -32,6 +32,9 @@ class LabelDataModule(L.LightningDataModule):
     ):
         super().__init__()
 
+        # kept whole so subclasses can read fields the base class does not know about
+        # (e.g. SelfDistillDataModule's `model_name`, which selects the front-end)
+        self.dataset_configs = dataset_configs
         self.parquet_path = dataset_configs.parquet_path
         self.name = dataset_configs.name
         self.columns = dataset_configs.columns
@@ -72,7 +75,13 @@ class LabelDataModule(L.LightningDataModule):
         # cached LocalPaths were written on the prestage node and won't match
         # this node's dataset_dir, whereas self.df was just built (load_df) with
         # the correct paths for this run.
-        cached = Path(self.data_dir) / "DCLDE_no_balance"
+        # Name comes from the dataset config so that caches for different
+        # clip_durations cannot collide: the clips themselves are named
+        # {start_ms}-{end_ms}.wav, so a 5 s stage and a 3 s stage share no files, and
+        # a shared manifest name would make one silently masquerade as the other.
+        # Default preserves the original name for datasets that don't set it.
+        manifest = self.dataset_configs.get("manifest_name", "DCLDE_no_balance")
+        cached = Path(self.data_dir) / manifest
         if cached.exists():
             ok = pl.read_parquet(cached).get_column("Soundfile")
             self.df = self.df.filter(pl.col("Soundfile").is_in(set(ok)))

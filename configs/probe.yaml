@@ -8,10 +8,14 @@
 #   python probe_selfdistill.py source=adapted ckpt_path=...      # adapted cell
 #   python probe_selfdistill.py source=frozen 'layers=[0,3,7,11]' # depth sweep
 defaults:
-  - data/dataset: dclde_selfdistill
+  # Either per-backbone dataset works here: probing never builds a front-end from the
+  # dataset config (the encoder applies its own, dispatching on input rank), so this
+  # only supplies the split and the manifest name — identical in both files.
+  - data/dataset: dclde_selfdistill_birdmae
   - data/loaders: default
   - data/transform: ssl_fbank_dclde
   - hydra: workstation
+  - logger: mlflow
   - module/network: mim_distillation
   - paths: workstation
   - _self_
@@ -32,10 +36,27 @@ layers: null
 # selection rests on a single recording condition.
 c_selection: train_cv
 
+# Energy / CO2eq accounting. See configs/callbacks/emissions.yaml for why offline is
+# the default and why `region` matters far more than the country code.
+emissions:
+  offline: true
+  country_iso_code: CAN
+  region: null
+  measure_power_secs: 30
+
 n_mfcc: 40
 batch_size: 32
 num_workers: 4
 device: cuda
 
 seed: 59
-task_name: "probe"
+
+# One MLflow experiment per ablation cell, same convention as selfdistill.yaml. The
+# encoder name is in there so the two frozen controls (C1 BEATs, C2 Bird-MAE) do not
+# share an experiment; override task_name directly for anything finer.
+task_name: "probe_${source}_${module.network.encoder.name}"
+logger:
+  experiment_name: ${task_name}
+  run_name: ${task_name}_${start_time}
+
+start_time: ${now:%Y-%m-%d_%H%M%S}

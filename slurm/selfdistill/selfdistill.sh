@@ -1,9 +1,17 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# Self-distillation training cell on the Alliance cluster. ONE script, three
-# arms — the arms differ only in backbone and one augmentation flag, and keeping
-# them in one file is what guarantees that (if they drifted apart, the ablation
-# would be comparing scripts rather than treatments).
+# Self-distillation training cell on Nibi. ONE script, three arms — the arms
+# differ only in backbone and one augmentation flag, and keeping them in one file
+# is what guarantees that (if they drifted apart, the ablation would be comparing
+# scripts rather than treatments).
+#
+# Nibi GPU instance names (--gpus=<name>:<n>):
+#   h100            full H100-80GB          (also h100_80gb)
+#   h100_3g.40gb    3/8 compute, 40GB       <- default here, see the header below
+#   h100_2g.20gb    2/8 compute, 20GB
+#   h100_1g.10gb    1/8 compute, 10GB
+# Roughly half the GPU nodes are MIG-configured, so a MIG slice usually queues
+# sooner than a full card.
 #
 #   sbatch slurm/selfdistill/selfdistill.sh birdmae        # C4  <- start here
 #   sbatch slurm/selfdistill/selfdistill.sh beats          # C3
@@ -18,11 +26,31 @@
 # ---------------------------------------------------------------------------
 #SBATCH --account=def-XXXX
 #SBATCH --job-name=selfdistill
-#SBATCH --gpus=h100:1                    # full H100; the MIG 3g.40gb slice used for
-                                         # finetune is tight for SSL batch sizes
+# --- Nibi GPU instance -----------------------------------------------------
+# Cores and memory below are Nibi's RECOMMENDED bundle for the requested instance.
+# Asking for more than the bundle makes the job wait for a whole node; asking for
+# less wastes allocation you are billed for anyway.
+#
+#   instance        RGU    recommended
+#   h100 (full)     12.2   14 cores, 250 GB
+#   h100_3g.40gb     6.1    6 cores, 124 GB   <- default here
+#   h100_2g.20gb     3.48   4 cores,  62 GB
+#   h100_1g.10gb     1.74   2 cores,  31 GB
+#
+# Start on 3g.40gb. Nibi bundles cores at a FIXED 1.15 cores per RGU, so a bigger GPU
+# brings proportionally more cores and the CPU:GPU balance is identical at every size
+# — scaling up does NOT fix a dataloader bottleneck, it scales both sides together.
+# So the only question a bigger instance answers is wall-clock vs queue time. Measure
+# GPU utilisation on the first run: if it sits low, the loader is the limit and a full
+# H100 buys nothing.
+#SBATCH --gpus=h100_3g.40gb:1
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=124G
+## full H100 — remember to change ALL THREE lines together:
+##SBATCH --gpus=h100:1
+##SBATCH --cpus-per-task=14
+##SBATCH --mem=250G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=12               # dataloader decodes 206k wavs; keep it fed
-#SBATCH --mem=80G
 #SBATCH --time=24:00:00                  # SSL over 206k clips; measure, then tune
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.out
@@ -45,16 +73,23 @@ PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
+# DATASET must move with NETWORK: the dataset config now carries model_name, which
+# picks the fbank applied in the dataloader workers. The datamodule raises if the two
+# disagree on sample rate, so a mismatch fails fast rather than training on a wrong
+# front-end.
 case "$ARM" in
   birdmae)
-    NETWORK="mim_distillation";        CKPT="$BIRDMAE_CKPT"; EXTRA=() ;;
+    NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
+    CKPT="$BIRDMAE_CKPT"; EXTRA=() ;;
   beats)
-    NETWORK="mim_distillation_beats";  CKPT="$BEATS_CKPT";   EXTRA=() ;;
+    NETWORK="mim_distillation_beats";  DATASET="dclde_selfdistill_beats"
+    CKPT="$BEATS_CKPT";   EXTRA=() ;;
   birdmae_nobg)
     # The attribution control: identical recipe with the cross-hydrophone noise
     # removed. Everything else — masking, EMA, FSQ, steps, lr — is unchanged, so
     # a difference is attributable to the de-confounding lever and nothing else.
-    NETWORK="mim_distillation";        CKPT="$BIRDMAE_CKPT"
+    NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
+    CKPT="$BIRDMAE_CKPT"
     EXTRA=(data.transform.augmentations.student.background.p=0.0) ;;
   *)
     echo "ERROR: unknown arm '$ARM' (birdmae | beats | birdmae_nobg)" >&2; exit 1 ;;
@@ -70,7 +105,18 @@ source "$VENV/bin/activate"
 export PROJECT_ROOT OUTPUT_DIR
 export HYDRA_FULL_ERROR=1
 export TOKENIZERS_PARALLELISM=false
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-12}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-6}"
+
+# Dataloader workers track the allocation, so changing --cpus-per-task (or the GPU
+# instance) needs no config edit. One core is left for the main process. This is the
+# knob that parallelises the fbank front-end, which now runs in the workers.
+NWORKERS=$(( ${SLURM_CPUS_PER_TASK:-6} - 1 ))
+[ "$NWORKERS" -lt 1 ] && NWORKERS=1
+echo "dataloader workers: $NWORKERS (of ${SLURM_CPUS_PER_TASK:-6} cores)"
+
+# Nibi compute nodes have no internet; CodeCarbon must stay offline (it is, by
+# config default) or it will block trying to geolocate for a grid-intensity lookup.
+export CODECARBON_LOG_LEVEL=error
 
 cd "$PROJECT_ROOT"
 mkdir -p logs/slurm
@@ -80,13 +126,17 @@ mkdir -p logs/slurm
 [ -f "$TARBALL" ] || { echo "ERROR: tarball not found: $TARBALL (run prestage on a login node)" >&2; exit 1; }
 
 # --- stage data to node-local NVMe ---------------------------------------
+# The tarball holds the CONTENTS of the clip tree (packed with `-C dataset_dir .`),
+# not a fixed top-level directory, so we choose the destination here and nothing
+# depends on what the staging directory was called on the login node.
 DATA_DIR="$SLURM_TMPDIR/data"
 if [ -f "$DATA_DIR/.staged_ok" ]; then
   echo "Dataset already staged, skipping extraction."
 else
   rm -rf "$DATA_DIR"
+  mkdir -p "$DATA_DIR"
   echo "Staging dataset to \$SLURM_TMPDIR ..."
-  tar -xf "$TARBALL" -C "$SLURM_TMPDIR"
+  time tar -xf "$TARBALL" -C "$DATA_DIR"
   touch "$DATA_DIR/.staged_ok"
 fi
 
@@ -99,11 +149,14 @@ echo "Staged $NCLIPS wav files to $DATA_DIR"
 # --- run ------------------------------------------------------------------
 srun python train_selfdistill.py \
     module/network="$NETWORK" \
+    data/dataset="$DATASET" \
     trainer=single_gpu \
     trainer.devices=1 \
     trainer.precision=bf16 \
     paths.dataset_dir="$DATA_DIR" \
     data.dataset.parquet_path="$PARQUET" \
+    data.loaders.train.num_workers="$NWORKERS" \
+    data.loaders.val.num_workers=2 \
     module.network.encoder.pretrained_weights_path="$CKPT" \
     task_name="selfdistill_$ARM" \
     "${EXTRA[@]}"

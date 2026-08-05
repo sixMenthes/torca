@@ -44,12 +44,24 @@ class SelfDistillDataset(Dataset):
     """
 
     def __init__(self, df, teacher_aug, student_aug, sample_rate, max_length,
-                 deterministic=False, seed=59):
+                 frontend=None, deterministic=False, seed=59):
         self.df = df
         self.teacher_aug = teacher_aug
         self.student_aug = student_aug
         self.sample_rate = int(sample_rate)
         self.max_length = int(max_length)
+        # Fbank front-end, applied HERE rather than in the model. kaldi's fbank is
+        # not batched, so in the model it is a serial Python loop over the batch,
+        # run twice per step (teacher + student). Measured at ~1.9 ms/sample scaling
+        # 15.14x from batch 1 to 16 — negligible against a CPU forward, dominant
+        # against an H100 one. In the dataset it runs inside the dataloader workers,
+        # parallel across num_workers and overlapped with the GPU.
+        #
+        # Safe because the fbank is FIXED: no parameters, no gradient (it is already
+        # under no_grad). Augmentation still happens on the waveform, before this.
+        # The PCEN cell must keep its front-end in the model, since PCEN is trainable
+        # and needs linear mel — pass frontend=None there.
+        self.frontend = frontend
         # deterministic=True: every clip gets the SAME augmentation every epoch, so a
         # validation curve reflects the model changing rather than the noise draw
         # changing. All three augmentations use torch's global RNG (torch.rand /
@@ -90,6 +102,20 @@ class SelfDistillDataset(Dataset):
             wave = F.pad(wave, (0, self.max_length - t))
         return wave, min(t, self.max_length)
 
+    def _view(self, aug, wave):
+        """Augment on the WAVEFORM, then apply the fixed front-end.
+
+        Order is not negotiable: the cross-hydrophone noise has to be mixed into the
+        audio, not into a spectrogram, or the de-confounding lever is measuring
+        something else entirely.
+
+        The front-end is fed a 1-D waveform and returns (1, frames, mel), so
+        default_collate stacks views into (B, 1, frames, mel) — exactly the rank the
+        encoders treat as "already preprocessed".
+        """
+        out = aug(wave.clone())
+        return out if self.frontend is None else self.frontend(out.squeeze(0))
+
     def __getitem__(self, index):
         row = self.df.row(index, named=True)
         path = row["LocalPath"]
@@ -104,13 +130,13 @@ class SelfDistillDataset(Dataset):
             # perturb the training RNG stream.
             with torch.random.fork_rng(devices=[]):
                 torch.manual_seed(self.seed + index)
-                teacher = self.teacher_aug(wave.clone())
-                student = self.student_aug(wave.clone())
+                teacher = self._view(self.teacher_aug, wave)
+                student = self._view(self.student_aug, wave)
             return {"teacher": teacher, "student": student,
                     "dataset": row["Dataset"], "n_valid": n_valid}
         return {
-            "teacher": self.teacher_aug(wave.clone()),
-            "student": self.student_aug(wave.clone()),
+            "teacher": self._view(self.teacher_aug, wave),
+            "student": self._view(self.student_aug, wave),
             "dataset": row["Dataset"],
             # samples of real audio before tail padding; the model turns this into a
             # per-patch validity mask. NOTE: RandomShift moves the signal inside the

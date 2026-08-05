@@ -38,7 +38,9 @@ from models.components.beats_encoder import BEATsEncoder
 from models.components.birdmae_encoder import BirdMAEEncoder
 from models.components.fsq import FSQ
 from models.components.selfdistill_loss import (
+    code_counts,
     codebook_logits,
+    entropy_bits,
     masked_ce,
     sample_student_mask,
     valid_token_mask,
@@ -120,6 +122,17 @@ class MIMDistillation(L.LightningModule):
         self.within_clip_var_weight = distill_cfg.get("within_clip_var_weight", 0.0)
         self.gamma = distill_cfg.get("gamma", 1.0)
         self.val_seed = distill_cfg.get("val_seed", 59)
+
+        # Epoch-level code-usage histograms. Entropy of pooled counts is not the mean
+        # of per-batch entropies, so the headline number has to come from an
+        # accumulator rather than from Lightning averaging per-step values.
+        # persistent=False: transient statistics, not model state — keep them out of
+        # checkpoints. NOTE single-process only; under DDP these need an all_reduce.
+        K = self.fsq.codebook_size
+        self.register_buffer("train_code_counts", torch.zeros(K, dtype=torch.long),
+                             persistent=False)
+        self.register_buffer("val_code_counts", torch.zeros(K, dtype=torch.long),
+                             persistent=False)
 
     def _build_branch(self, encoder_cfg, tokenizer_cfg, levels):
         """One encoder+projector branch. Called twice (student, teacher)."""
@@ -211,7 +224,9 @@ class MIMDistillation(L.LightningModule):
         with torch.no_grad():
             # Codebook usage is THE health metric: FSQNet's earlier failure was a
             # collapsed codebook that a falling loss curve happily concealed.
-            used = target_indices[valid].unique().numel()
+            counts = code_counts(target_indices, valid, self.fsq.codebook_size)
+            self.train_code_counts += counts
+            used = int((counts > 0).sum())
             acc = (logits.argmax(-1) == target_indices)[student_mask].float().mean()
 
         self.log_dict(
@@ -220,13 +235,26 @@ class MIMDistillation(L.LightningModule):
                 "train/ce": ce,
                 "train/vic_var": vic_parts["vic_var"],
                 "train/vic_cov": vic_parts["vic_cov"],
-                "train/codes_used": float(used),
-                "train/codebook_frac": used / self.fsq.codebook_size,
                 "train/masked_acc": acc,
                 "train/valid_frac": valid.float().mean(),
                 "train/ema_decay": self._current_decay(),
             },
             prog_bar=True, on_step=True, on_epoch=True, batch_size=student_wave.shape[0],
+        )
+        # Per-BATCH codebook stats, logged separately with on_epoch=False. Inside
+        # log_dict they would inherit on_epoch=True, and Lightning would append
+        # "_epoch" — colliding with the pooled epoch metrics of the same name written
+        # by on_train_epoch_end, silently mixing two different quantities. They are
+        # different: "how much of the codebook does one batch touch" (here) vs "how
+        # much does the whole epoch touch" (there). Entropy additionally cannot be
+        # epoch-averaged at all, being concave.
+        self.log_dict(
+            {
+                "train/codes_used_batch": float(used),
+                "train/codebook_frac_batch": used / self.fsq.codebook_size,
+                "train/token_bits_batch": entropy_bits(counts),
+            },
+            on_step=True, on_epoch=False, batch_size=student_wave.shape[0],
         )
         return loss
 
@@ -259,21 +287,54 @@ class MIMDistillation(L.LightningModule):
         )
         loss = self.ce_weight * ce + vic
 
-        used = target_indices[valid].unique().numel()
+        counts = code_counts(target_indices, valid, self.fsq.codebook_size)
+        self.val_code_counts += counts
+        used = int((counts > 0).sum())
         acc = (logits.argmax(-1) == target_indices)[student_mask].float().mean()
         self.log_dict(
             {
                 "val/loss": loss,
                 "val/ce": ce,
-                # codebook usage on a channel the model never adapted on — a stronger
-                # collapse signal than the training-set version
-                "val/codebook_frac": used / self.fsq.codebook_size,
+                # per-batch support, averaged; the pooled epoch figure is val/codebook_frac
+                "val/codebook_frac_batch": used / self.fsq.codebook_size,
                 "val/masked_acc": acc,
             },
             prog_bar=True, on_step=False, on_epoch=True,
             batch_size=student_wave.shape[0], sync_dist=True,
         )
         return loss
+
+    # ---------------------------------------------------------------- codebook health
+
+    def _log_epoch_codebook(self, stage, counts):
+        """Entropy and support of the code distribution pooled over a whole epoch.
+
+        `token_bits` is the real capacity of the tokenizer: log2(K) is only a ceiling,
+        reached when codes are used equally often. `token_bits_frac` normalises by that
+        ceiling, so runs with DIFFERENT `levels` are directly comparable — which
+        `codebook_frac` and raw bits are not.
+        """
+        bits = entropy_bits(counts)
+        ceiling = math.log2(self.fsq.codebook_size)
+        used = int((counts > 0).sum())
+        self.log_dict(
+            {
+                f"{stage}/token_bits": bits,
+                f"{stage}/token_bits_frac": bits / ceiling,
+                # pooled over the whole epoch — the headline support figure. The
+                # per-batch counterpart is {stage}/codebook_frac_batch.
+                f"{stage}/codebook_frac": used / self.fsq.codebook_size,
+                f"{stage}/codes_used": float(used),
+            },
+            prog_bar=False, sync_dist=True,
+        )
+        counts.zero_()
+
+    def on_train_epoch_end(self):
+        self._log_epoch_codebook("train", self.train_code_counts)
+
+    def on_validation_epoch_end(self):
+        self._log_epoch_codebook("val", self.val_code_counts)
 
     # ---------------------------------------------------------------- EMA
 

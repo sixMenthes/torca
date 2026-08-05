@@ -2,6 +2,7 @@ import polars as pl
 from torch.utils.data import DataLoader
 
 from util.pylogger import get_pylogger
+from models.components.fbank_frontend import make_frontend
 from torca_datamodule import LabelDataModule, collate_fn_skip
 from torca_transforms import RandomShift, RandomGain, AddBackgroundNoise
 from selfdistill_dataset import SelfDistillDataset, WaveformViewAug
@@ -72,11 +73,37 @@ class SelfDistillDataModule(LabelDataModule):
 
         return WaveformViewAug(ops)
 
+    def _build_frontend(self, sr):
+        """Fbank front-end for this dataset's backbone, or None to leave it in the model.
+
+        `model_name` lives in the DATASET config because the dataset is what produces
+        the features now — and the two backbones need genuinely different fbanks
+        (BEATs scales by 2**15 and skips mean-subtraction; Bird-MAE does the opposite
+        and pads to a fixed target_length).
+
+        The sample-rate cross-check is the important part: model_name and the
+        transform's sample_rate come from different config files, and a BEATs
+        front-end fed 32 kHz audio would produce a perfectly valid-looking
+        spectrogram that is simply wrong. Fail loudly instead.
+        """
+        name = self.dataset_configs.get("model_name", None)
+        if not name:
+            return None
+        expected = {"BEATs": 16000, "BirdMAE": 32000}[name]
+        if sr != expected:
+            raise ValueError(
+                f"dataset model_name={name} expects {expected} Hz but the transform "
+                f"gives {sr} Hz — the dataset yaml and module/network disagree"
+            )
+        return make_frontend(name, sample_rate=sr,
+                             target_length=int(self.transform_config.target_length))
+
     def setup(self, stage: str):
         if stage in ("fit", None):
             sr = int(self.transform_config.input.sample_rate)
             max_length = int(sr * self.transform_config.clip_duration)
             bank = self._ssl_background_bank()
+            frontend = self._build_frontend(sr)
 
             # Asymmetric views: teacher clean, student strong. This asymmetry is what
             # turns the masked-prediction objective into a denoising / channel-
@@ -92,6 +119,7 @@ class SelfDistillDataModule(LabelDataModule):
                 student_aug,
                 sample_rate=sr,
                 max_length=max_length,
+                frontend=frontend,
             )
 
             # Held-out RECORDING CONDITION (CarmanahPt), which is the right thing to
@@ -107,6 +135,7 @@ class SelfDistillDataModule(LabelDataModule):
                 student_aug,
                 sample_rate=sr,
                 max_length=max_length,
+                frontend=frontend,
                 deterministic=True,
             )
 

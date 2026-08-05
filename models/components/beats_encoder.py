@@ -74,13 +74,19 @@ class BEATsEncoder(nn.Module):
         Mirrors the first half of BEATs.extract_features. padding_mask is dropped:
         the SSL dataset serves fixed-length clips, so every position is valid.
         """
-        if wave.dim() == 3:                       # (B, 1, T) -> (B, T)
-            wave = wave.squeeze(1)
-        with torch.no_grad():                     # fbank is a fixed front-end
-            fbank = self.beats.preprocess(
-                wave, fbank_mean=self.fbank_mean, fbank_std=self.fbank_std
-            )
-        x = self.beats.patch_embedding(fbank.unsqueeze(1))
+        # Rank dispatch: 4-D (B, 1, frames, mel) means BEATsFbank already ran in the
+        # dataloader workers; anything else is a raw waveform and gets preprocessed
+        # here. See BirdMAEEncoder.tokens for why both paths are kept.
+        if wave.dim() == 4:
+            fbank = wave
+        else:
+            if wave.dim() == 3:                   # (B, 1, T) -> (B, T)
+                wave = wave.squeeze(1)
+            with torch.no_grad():                 # fbank is a fixed front-end
+                fbank = self.beats.preprocess(
+                    wave, fbank_mean=self.fbank_mean, fbank_std=self.fbank_std
+                ).unsqueeze(1)
+        x = self.beats.patch_embedding(fbank)
         x = x.reshape(x.shape[0], x.shape[1], -1).transpose(1, 2)
         x = self.beats.layer_norm(x)
         if self.beats.post_extract_proj is not None:

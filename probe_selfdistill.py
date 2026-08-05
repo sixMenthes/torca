@@ -31,6 +31,7 @@ import hydra
 from omegaconf import DictConfig
 
 import probe as probe_lib
+from emissions import track_emissions
 from probe_features import (
     build_loader,
     encoder_from_checkpoint,
@@ -107,21 +108,44 @@ def run(cfg: DictConfig):
         list(cfg.data.dataset.low_sr_hydros),
     )
 
-    if cfg.source == "mfcc":
-        cells = {"mfcc": (extract_mfcc(loader, sr, n_mfcc=cfg.n_mfcc))}
-    else:
-        encoder = _build_encoder(cfg)
-        layers = list(cfg.layers) if cfg.get("layers") else [None]
-        cells = {
-            (f"layer{l}" if l is not None else "final"):
-                extract_backbone(encoder, loader, layer=l, device=cfg.device)
-            for l in layers
-        }
+    # Feature extraction is the expensive part (a backbone forward over every
+    # labelled clip), so that is what the tracker wraps; the probe fits themselves
+    # are sklearn on a few thousand rows.
+    emissions_cfg = cfg.get("emissions", {}) or {}
+    with track_emissions(logger=None, project_name=cfg.task_name,
+                         output_dir=str(cfg.paths.get("log_dir", ".")),
+                         **emissions_cfg) as emissions:
+        if cfg.source == "mfcc":
+            cells = {"mfcc": (extract_mfcc(loader, sr, n_mfcc=cfg.n_mfcc))}
+        else:
+            encoder = _build_encoder(cfg)
+            layers = list(cfg.layers) if cfg.get("layers") else [None]
+            cells = {
+                (f"layer{l}" if l is not None else "final"):
+                    extract_backbone(encoder, loader, layer=l, device=cfg.device)
+                for l in layers
+            }
 
     # Background index drives the nuisance probe's channel-only restriction.
     bg_index = dm.label_map.get("Background", -1)
     if bg_index < 0:
         log.warning("no 'Background' class in label_map — nuisance probe will fail")
+
+    # Results go to MLflow as well as stdout: six cells plus a levels sweep is too many
+    # numbers to transcribe from terminal output reliably.
+    logger = None
+    if cfg.get("logger") and not sys.gettrace():
+        logger = hydra.utils.instantiate(cfg.logger)
+        logger.log_hyperparams({
+            "source": cfg.source,
+            "ckpt_path": str(cfg.get("ckpt_path")),
+            "layers": str(list(cfg.layers) if cfg.get("layers") else ["final"]),
+            "c_selection": cfg.c_selection,
+            "encoder": cfg.module.network.encoder.name,
+            "clip_duration": cfg.data.dataset.clip_duration,
+            "test_hydros": str(list(cfg.data.dataset.test_hydros)),
+            "n_labelled_clips": df.height,
+        })
 
     header = (f"{'cell':>10} {'dim':>6} {'task/ecotype':>14} {'nuisance/bg':>16} "
               f"{'calltype':>10}")
@@ -167,6 +191,25 @@ def run(cfg: DictConfig):
             print(f"{'':>10} per test hydrophone: {per}  (C={task['C']})")
         chance = (task["majority_baseline"], nuis["majority_baseline"])
 
+        if logger:
+            metrics = {
+                f"{name}/task_ecotype": task["balanced_acc"],
+                f"{name}/task_ecotype_chance": task["majority_baseline"],
+                f"{name}/nuisance_bg": nuis["balanced_acc"],
+                f"{name}/nuisance_bg_std": nuis["std"],
+                f"{name}/nuisance_bg_chance": nuis["majority_baseline"],
+                f"{name}/nuisance_bg_hydros": float(nuis["n_hydrophones"]),
+                f"{name}/feature_dim": float(X.shape[1]),
+                f"{name}/C": float(task["C"]),
+            }
+            if ct != "n/a":
+                metrics[f"{name}/task_calltype"] = float(ct)
+            # per-hydrophone breakdown matters here: with two test hydrophones the
+            # headline can be carried by one of them, and that is worth seeing
+            for hydro, val in task["per_hydrophone"].items():
+                metrics[f"{name}/task_ecotype/{hydro}"] = val
+            logger.log_metrics(metrics)
+
     if chance:
         print(f"\nchance: ecotype {chance[0]:.3f} (test split), "
               f"hydrophone {chance[1]:.3f} "
@@ -178,6 +221,18 @@ def run(cfg: DictConfig):
               "the result. The background.p=0.0 run is the control that attributes it.")
     print("Win = task UP and nuisance DOWN, jointly. Task alone selects cells that "
           "adapted deeper into the confound.")
+
+    if logger:
+        # emissions is populated on exit from the context manager above, which happens
+        # before this point — logged here so it lands in the same MLflow run
+        if emissions:
+            logger.log_metrics(emissions)
+            print(f"\nemissions: {emissions.get('emissions/co2eq_kg', 0):.6f} kg CO2eq, "
+                  f"{emissions.get('emissions/energy_kwh', 0):.4f} kWh")
+        # finalize() flushes and closes the MLflow run. There is no Trainer here to do
+        # it, so without this the run is left in RUNNING state in the UI.
+        logger.finalize("success")
+        log.info(f"logged to MLflow experiment '{cfg.logger.experiment_name}'")
 
 
 if __name__ == "__main__":

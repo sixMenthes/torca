@@ -1,0 +1,19 @@
+emissions:
+  _target_: emissions.EmissionsLogger
+
+  # offline=true uses OfflineEmissionsTracker, which needs no network. The default
+  # online tracker geolocates via a web request — Alliance compute nodes have no
+  # internet, so it would hang or fail there. Keep this true on the cluster.
+  offline: true
+
+  # REGION MATTERS MORE THAN ANYTHING ELSE HERE. Canada's national average carbon
+  # intensity is dominated by Alberta/Saskatchewan fossil generation, while the
+  # Calcul Quebec clusters run on a ~95% hydro grid. Reporting the national average
+  # for a Quebec-hosted job overstates emissions by roughly an order of magnitude.
+  # Set this to where the job ACTUALLY ran: "quebec" for the Calcul Quebec systems,
+  # or null to fall back to the national average.
+  country_iso_code: CAN
+  region: null
+
+  project_name: null          # defaults to the logger name
+  measure_power_secs: 30      # sampling interval; 30s is plenty for multi-hour runs

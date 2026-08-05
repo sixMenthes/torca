@@ -42,31 +42,25 @@ cd "$PROJECT_ROOT"
 
 echo "clip_duration = $CLIP_DURATION   (must equal data.dataset.clip_duration)"
 
-# --- download -------------------------------------------------------------
-# Idempotent: existing clips are skipped, so re-run freely after an interruption.
+# --- download, write the manifest, tar, and drop the loose tree ------------
+# One command does all four. Idempotent: existing clips are skipped, so re-run
+# freely after an interruption (which also retries any transient GCS failures).
+#
+# --tar is not optional in practice. 206k loose files burn inode quota and make
+# every job start re-stat the tree through the Lustre metadata server; the tarball
+# turns that into one sequential read onto node-local NVMe. The manifest is written
+# BEFORE the tar, so it travels inside the archive and prepare_data finds it after
+# extraction — its LocalPaths are ignored (only Soundfile is read), which is exactly
+# why a staging-node path causes no problem on the compute node.
+#
+# --remove-loose refuses if the tar entry count is short, so a truncated archive
+# cannot silently become your only copy.
 python prestage_clips.py \
     --parquet "$PARQUET" \
     --dataset-dir "$STAGE/data" \
     --clip-duration "$CLIP_DURATION" \
-    --workers "$WORKERS"
-
-python prestage_clips.py --parquet "$PARQUET" --dataset-dir "$STAGE/data" \
-    --clip-duration "$CLIP_DURATION" --verify
-
-n=$(find "$STAGE/data" -name '*.wav' | wc -l)
-echo "Downloaded $n wav clips."
-[ "$n" -gt 0 ] || { echo "ERROR: no clips downloaded — check GCS access" >&2; exit 1; }
-
-# --- pack -----------------------------------------------------------------
-# The tar includes the DCLDE_no_balance manifest written inside data/. That is
-# deliberate: prepare_data reads it to skip downloading, and it only uses the
-# Soundfile column — the LocalPaths inside it are ignored, precisely because
-# they point at this staging path rather than the compute node's $SLURM_TMPDIR.
-echo "Packing tarball -> $TARBALL"
-tar -cf "$TARBALL" -C "$STAGE" data
-echo "Tarball size: $(du -h "$TARBALL" | cut -f1)"
-
-echo "Removing loose staging files from scratch ..."
-rm -rf "$STAGE/data"
+    --workers "$WORKERS" \
+    --tar "$TARBALL" \
+    --remove-loose
 
 echo "Done. Point TARBALL in slurm/selfdistill/selfdistill.sh at: $TARBALL"

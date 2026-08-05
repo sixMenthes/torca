@@ -156,7 +156,12 @@ class BirdMAEEncoder(nn.Module):
         truncated the same way (its encoder skips its own final norm when a target
         layer is given), so the two backbones stay comparable.
         """
-        x = self.frontend(wave)  # (B, 1, target_length, mel)
+        # Rank dispatch: 4-D means the front-end already ran in the dataloader
+        # workers (SelfDistillDataset), 3-D/2-D means a raw waveform and we run it
+        # here. Keeping both paths lets the probe scripts pass waveforms to an encoder
+        # loaded from a checkpoint whose training fed it precomputed features — the
+        # front-end holds no parameters, so nothing about the weights differs.
+        x = wave if wave.dim() == 4 else self.frontend(wave)
         x = self.vit.patch_embed(x)  # (B, N, D)
 
         if mask is not None:

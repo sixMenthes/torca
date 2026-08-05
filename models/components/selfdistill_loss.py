@@ -103,6 +103,40 @@ def masked_ce(logits, target_indices, loss_mask):
     )
 
 
+def code_counts(indices, valid, codebook_size):
+    """Histogram of FSQ code usage over valid positions. (K,) long tensor.
+
+    Returned rather than reduced so the caller can accumulate across a whole epoch:
+    the entropy of pooled counts is NOT the mean of per-batch entropies (entropy is
+    concave, so averaging per-batch values understates the pooled figure).
+    """
+    sel = indices[valid] if valid is not None else indices
+    return torch.bincount(sel.reshape(-1), minlength=codebook_size)
+
+
+def entropy_bits(counts):
+    """Empirical entropy of a code-usage histogram, in bits: H = -sum p log2 p.
+
+    This is what `codebook_frac` cannot see. Support size counts how many codes appear
+    at all, so it scores "1000 codes, one of them used 99% of the time" as healthy.
+    Entropy is the quantity that actually bounds what a token can carry, and it reads
+    directly against the log2(K) ceiling.
+
+    Concretely: a K=1000 run collapsed onto 50 codes carries 5.6 bits — LESS than the
+    K=240 config it replaced (7.9) — while looking larger in the config file.
+
+    Note this is the plug-in estimator, biased DOWNWARD when the sample is small
+    relative to K (roughly (K-1)/(2 N ln2) bits). Accumulate over an epoch for the
+    headline number; per-batch values are a live signal, not an estimate to quote.
+    """
+    total = counts.sum()
+    if total == 0:
+        return counts.new_zeros((), dtype=torch.float32)
+    p = counts.float() / total.float()
+    p = p[p > 0]
+    return -(p * p.log2()).sum()
+
+
 def _masked_select_tokens(z, valid):
     """(B, N, L) + (B, N) bool -> (M, L) of valid tokens only."""
     return z[valid]

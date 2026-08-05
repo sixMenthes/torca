@@ -7,9 +7,25 @@
 # StrGeo* (DFO_WDA) are different instrument/depth/time = different recording chains.
 parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
 dataset_dir: ${paths.dataset_dir}
-name: DCLDE_selfdistill
+name: DCLDE_selfdistill_birdmae
+
+# Selects the fbank the DATASET applies, in the dataloader workers. The two backbones
+# need different front-ends (Bird-MAE: hanning window, htk_compat, mean-subtracted
+# waveform, padded to target_length; BEATs: x2**15, kaldi defaults, no padding), and
+# the front-end moved out of the model because kaldi's fbank is not batched — in the
+# model it is a serial Python loop run twice per step, which dominates on a fast GPU.
+# The datamodule cross-checks this against the transform's sample_rate and raises on a
+# mismatch, since a BEATs fbank fed 32 kHz audio looks perfectly valid and is wrong.
+# Set to null to keep the front-end in the model (the PCEN cell needs that).
+model_name: BirdMAE
 
 num_workers: 4
+
+# Cache manifest written by prestage_clips.py and read by prepare_data. Named per
+# clip_duration on purpose: clips are {start_ms}-{end_ms}.wav, so a 5s stage and a
+# 3s stage share no files — a shared manifest name would let one masquerade as the
+# other and the run would train on empty batches without erroring.
+manifest_name: DCLDE_3secs.parquet
 
 columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath']
 

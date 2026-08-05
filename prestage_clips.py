@@ -21,6 +21,7 @@ interruption only fetches what is missing.
 """
 
 import argparse
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -70,6 +71,110 @@ def fetch_source_file(gcs_path, starts, ends, paths):
     return written, None
 
 
+def existing_clips(dataset_dir):
+    """Every .wav under dataset_dir, as a set of absolute paths — via ONE tree walk.
+
+    Emphatically not `Path(p).exists()` per row. On Lustre each stat is a round trip
+    to the metadata server, so 206k of them serially takes tens of minutes and hammers
+    the MDS — the exact access pattern the Alliance "large collections of files"
+    guidance tells you to avoid. A single os.walk gets the same answer from sequential
+    readdir calls in seconds.
+    """
+    found = set()
+    for root, _, files in os.walk(dataset_dir):
+        for f in files:
+            if f.endswith(".wav"):
+                found.add(os.path.join(root, f))
+    return found
+
+
+def make_tarball(dataset_dir, tarball):
+    """Pack the clip tree into ONE file, and verify the entry count before trusting it.
+
+    206k loose files is the thing Lustre is worst at: it burns inode quota and every
+    job start re-stats the tree through the metadata server. One tarball copied to
+    node-local NVMe and extracted there turns that into a single sequential read.
+
+    Packed as `-C dataset_dir .` so the archive holds the CONTENTS, not the directory
+    name — the job then extracts into a directory of its own choosing and nothing
+    depends on what the staging directory happened to be called.
+
+    Uses system tar rather than the tarfile module: for this many small entries the
+    difference is minutes versus much longer.
+    """
+    import subprocess
+
+    tarball = Path(tarball)
+    tarball.parent.mkdir(parents=True, exist_ok=True)
+    tmp = tarball.with_suffix(tarball.suffix + ".part")
+
+    print(f"\npacking {dataset_dir} -> {tarball}")
+    subprocess.run(["tar", "-cf", str(tmp), "-C", str(dataset_dir), "."], check=True)
+
+    # Verify before the tarball is trusted (and certainly before anyone deletes the
+    # loose copy): a truncated archive that is never checked is worse than no archive.
+    n = int(subprocess.run(["bash", "-c", f"tar -tf {tmp} | wc -l"],
+                           capture_output=True, text=True, check=True).stdout.strip())
+    tmp.rename(tarball)
+    size = subprocess.run(["du", "-h", str(tarball)], capture_output=True,
+                          text=True).stdout.split()[0]
+    print(f"  {n} entries, {size}")
+    return n
+
+
+def write_manifest(manifest, args):
+    """Report what landed on disk and write the cache manifest.
+
+    prepare_data filters self.df by the Soundfile values in here, so source files that
+    failed entirely drop out of the run. The filter is per SOURCE FILE, not per clip
+    (Soundfile is shared by ~16 annotations on average), so a partially-fetched file
+    keeps all its rows; the stragglers return None at load time and collate_fn_skip
+    drops them.
+    """
+    print("scanning dataset dir (one tree walk, not 206k stats) ...")
+    found = existing_clips(args.dataset_dir)
+    n_files = len(found)
+    print(f"  {n_files} .wav files found on disk")
+
+    survived = manifest.filter(pl.col("LocalPath").is_in(list(found)))
+    n, total = survived.height, manifest.height
+    print(f"clips on disk : {n} / {total} ({100*n/total:.1f}%)")
+
+    if n < total:
+        missing = manifest.filter(~pl.col("LocalPath").is_in(list(found)))
+        print("\nmissing clips by hydrophone:")
+        print(missing.group_by("Dataset").len().sort("len", descending=True).head(12))
+        print("missing clips by provider:")
+        print(missing.group_by("Provider").len().sort("len", descending=True).head(8))
+        print("call-type labels lost:",
+              missing.get_column("CalltypeCategory").drop_nulls().len())
+
+    if args.verify:
+        print("\n(--verify: nothing written)")
+        return
+
+    out = Path(args.dataset_dir) / args.manifest_name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    survived.write_parquet(out)
+    print(f"\nmanifest      : {out}")
+    print("prepare_data will now skip downloading. If you change clip_duration, "
+          "DELETE this manifest and re-run — otherwise the run silently sees no data.")
+
+    # Tar AFTER the manifest is written, so the archive contains it. The job script
+    # extracts both together and prepare_data finds the cache immediately.
+    if args.tar:
+        n = make_tarball(args.dataset_dir, args.tar)
+        if args.remove_loose:
+            if n < n_files:
+                print(f"REFUSING to delete loose files: tar has {n} entries but the "
+                      f"tree had {n_files} .wav files")
+            else:
+                import shutil
+                print(f"removing loose tree {args.dataset_dir} ...")
+                shutil.rmtree(args.dataset_dir)
+                print("done — the tarball is now the only copy")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -80,12 +185,23 @@ def main():
     ap.add_argument("--clip-duration", type=float, default=3.0,
                     help="must equal data.dataset.clip_duration in the run config")
     ap.add_argument("--workers", type=int, default=32)
-    ap.add_argument("--manifest-name", default="DCLDE_no_balance",
-                    help="cache filename LabelDataModule.prepare_data looks for")
+    ap.add_argument("--manifest-name", default="DCLDE_3secs.parquet",
+                    help="cache filename prepare_data looks for; must match "
+                         "data.dataset.manifest_name in the run config")
     ap.add_argument("--limit", type=int, default=None,
                     help="only process the first N source files (smoke test)")
     ap.add_argument("--verify", action="store_true",
-                    help="report how many clips already exist; download nothing")
+                    help="report how many clips exist; download nothing, write nothing")
+    ap.add_argument("--manifest-only", action="store_true",
+                    help="skip downloading, just scan the dir and write the manifest "
+                         "(use after an interrupted run whose clips already landed)")
+    ap.add_argument("--tar", default=None, metavar="PATH",
+                    help="pack the clip tree into this tarball after writing the "
+                         "manifest. Do this: 206k loose files burn inode quota and "
+                         "hammer the Lustre metadata server on every job start")
+    ap.add_argument("--remove-loose", action="store_true",
+                    help="delete the loose tree once --tar has been verified. "
+                         "DESTRUCTIVE; refuses if the tar entry count looks short")
     args = ap.parse_args()
 
     print(f"parquet       : {args.parquet}")
@@ -98,14 +214,8 @@ def main():
     print(f"clips planned : {manifest.height} over "
           f"{manifest.get_column('GCSPath').n_unique()} source files")
 
-    if args.verify:
-        exists = [Path(p).exists() for p in manifest.get_column("LocalPath")]
-        n = sum(exists)
-        print(f"\non disk       : {n} / {manifest.height} ({100*n/manifest.height:.1f}%)")
-        if n < manifest.height:
-            missing = manifest.filter(~pl.Series(exists))
-            print("missing by hydrophone:")
-            print(missing.group_by("Dataset").len().sort("len", descending=True).head(10))
+    if args.verify or args.manifest_only:
+        write_manifest(manifest, args)
         return
 
     jobs = manifest.group_by("GCSPath", maintain_order=True).agg(
@@ -134,21 +244,7 @@ def main():
     for f in failures[:10]:
         print(f"  {f}")
 
-    # Cache manifest: prepare_data filters self.df by the Soundfile values in here, so
-    # source files that failed entirely are dropped from the run. Note the filter is
-    # per SOURCE FILE, not per clip (Soundfile is shared by ~16 annotations on
-    # average), so a partially-fetched file keeps all its rows; the stragglers return
-    # None at load time and collate_fn_skip drops them.
-    on_disk = [Path(p).exists() for p in manifest.get_column("LocalPath")]
-    survived = manifest.filter(pl.Series(on_disk))
-    out = Path(args.dataset_dir) / args.manifest_name
-    out.parent.mkdir(parents=True, exist_ok=True)
-    survived.write_parquet(out)
-
-    print(f"clips on disk : {survived.height} / {manifest.height}")
-    print(f"manifest      : {out}")
-    print("\nprepare_data will now skip downloading. If you change clip_duration, "
-          "DELETE this manifest and re-run — otherwise the run silently sees no data.")
+    write_manifest(manifest, args)
 
 
 if __name__ == "__main__":
