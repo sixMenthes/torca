@@ -1,0 +1,24 @@
+# @package _global_
+# Bird-MAE arm of the self-distillation ablation (cells C4 / C5).
+#
+#   python train_selfdistill.py experiment=selfdistill_birdmae
+#
+# This exists so the backbone cannot be half-switched. The fbank front-end now runs
+# in the dataloader workers, so the choice of backbone lives in TWO config groups —
+# data/dataset (which front-end the dataset builds) and module/network (which encoder
+# the model builds). Setting only one of them used to give you a BEATs fbank feeding
+# a Bird-MAE encoder; SelfDistillDataModule._build_frontend now raises on the
+# sample-rate mismatch instead, but the right fix is to make the pair unsplittable.
+#
+# Nothing else differs between the arms — same recipe, same hyperparameters — which
+# is the point of the study design: adaptation is a homogeneous on/off treatment
+# rather than a different objective per backbone.
+#
+# NOTE: do not set `task_name` here. `_self_` is LAST in selfdistill.yaml's defaults
+# list, so that file's own keys are merged after this one and its task_name would win
+# silently. Group selections (the overrides below) are resolved in the defaults list
+# and are unaffected. Set it on the command line:
+#   python train_selfdistill.py experiment=selfdistill_birdmae task_name=selfdistill_birdmae
+defaults:
+  - override /data/dataset: dclde_selfdistill_birdmae   # model_name: BirdMAE, 32 kHz
+  - override /module/network: mim_distillation          # BirdMAE encoder, 32 kHz

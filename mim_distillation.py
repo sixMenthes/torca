@@ -198,6 +198,13 @@ class MIMDistillation(L.LightningModule):
     # ---------------------------------------------------------------- step
 
     def training_step(self, batch, batch_idx):
+        # collate_fn_skip returns None when EVERY clip in the batch failed to load
+        # (missing file, unreadable wav). Returning None here is lightning's own
+        # "skip this batch"; without it the None propagates into the subscript below
+        # and the run dies with a TypeError that says nothing about missing clips.
+        # Common while the prestage is still running, or after a clip_duration change.
+        if batch is None:
+            return None
         student_wave, teacher_wave = batch["student"], batch["teacher"]
 
         # Teacher first: it fixes N (BEATs has no static num_patches — the token count
@@ -267,6 +274,8 @@ class MIMDistillation(L.LightningModule):
         noise draw and a fresh mask each epoch add variance that swamps the signal you
         are trying to read.
         """
+        if batch is None:                      # see training_step
+            return None
         student_wave, teacher_wave = batch["student"], batch["teacher"]
 
         target_indices = self.teacher_forward(teacher_wave)

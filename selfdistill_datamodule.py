@@ -145,8 +145,10 @@ class SelfDistillDataModule(LabelDataModule):
             num_workers=self.train_loader_configs.num_workers,
             batch_size=self.train_loader_configs.batch_size,
             shuffle=True,
-            persistent_workers=self.train_loader_configs.persistent_workers,
-            pin_memory=self.train_loader_configs.pin_memory,
+            persistent_workers=self.train_loader_configs.get(
+                "persistent_workers", False
+            ),
+            pin_memory=self.train_loader_configs.get("pin_memory", False),
             collate_fn=collate_fn_skip,
         )
 
@@ -163,8 +165,10 @@ class SelfDistillDataModule(LabelDataModule):
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=False,
-            persistent_workers=self.val_loader_configs.persistent_workers,
-            pin_memory=self.val_loader_configs.pin_memory,
+            persistent_workers=self.val_loader_configs.get(
+                "persistent_workers", False
+            ),
+            pin_memory=self.val_loader_configs.get("pin_memory", False),
             collate_fn=collate_fn_skip,
         )
 

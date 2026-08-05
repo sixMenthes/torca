@@ -1,0 +1,21 @@
+# @package _global_
+# BEATs arm of the self-distillation ablation (cell C3).
+#
+#   python train_selfdistill.py experiment=selfdistill_beats
+#
+# See selfdistill_birdmae.yaml for why the pair is bound together in one file. The
+# two groups below MUST agree on sample rate: the dataset config's `model_name`
+# selects the fbank the dataloader workers apply (BEATs scales by 2**15, skips
+# mean-subtraction, uses kaldi window defaults and does no target_length padding),
+# while module/network selects the encoder. A BEATs fbank fed 32 kHz audio produces a
+# perfectly valid-looking spectrogram that is simply wrong, which is why
+# SelfDistillDataModule._build_frontend cross-checks and raises.
+#
+# data/transform needs no override: ssl_fbank_dclde.yaml interpolates
+# input.sample_rate from ${module.network.sampling_rate}, so switching the network
+# here carries the transform to 16 kHz with it.
+#
+# NOTE: do not set `task_name` here — see selfdistill_birdmae.yaml.
+defaults:
+  - override /data/dataset: dclde_selfdistill_beats     # model_name: BEATs, 16 kHz
+  - override /module/network: mim_distillation_beats    # BEATs encoder, 16 kHz

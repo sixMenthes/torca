@@ -119,8 +119,14 @@ class LabelDataModule(L.LightningDataModule):
             num_workers=self.train_loader_configs.num_workers,
             batch_size=self.train_loader_configs.batch_size,
             shuffle=self.train_loader_configs.shuffle,
-            persistent_workers=self.train_loader_configs.persistent_workers,
-            pin_memory=self.train_loader_configs.pin_memory,
+            # .get with a default: not every loaders config defines these
+            # (default.yaml defines neither, audioset_balanced.yaml omits
+            # persistent_workers), and a missing key is a ConfigAttributeError
+            # under hydra's struct mode rather than a fallback.
+            persistent_workers=self.train_loader_configs.get(
+                "persistent_workers", False
+            ),
+            pin_memory=self.train_loader_configs.get("pin_memory", False),
         )
 
     def _background_bank(self):
@@ -136,21 +142,23 @@ class LabelDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self):
+        persistent = self.val_loader_configs.get("persistent_workers", False)
+        pin = self.val_loader_configs.get("pin_memory", False)
         val_dataloader = DataLoader(
             self.val_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=self.val_loader_configs.shuffle,
-            persistent_workers=self.val_loader_configs.persistent_workers,
-            pin_memory=self.val_loader_configs.pin_memory,
+            persistent_workers=persistent,
+            pin_memory=pin,
         )
         call_dataloader = DataLoader(
             self.call_set,
             num_workers=self.val_loader_configs.num_workers,
             batch_size=self.val_loader_configs.batch_size,
             shuffle=self.val_loader_configs.shuffle,
-            persistent_workers=self.val_loader_configs.persistent_workers,
-            pin_memory=self.val_loader_configs.pin_memory,
+            persistent_workers=persistent,
+            pin_memory=pin,
         )
         return [val_dataloader, call_dataloader]
 

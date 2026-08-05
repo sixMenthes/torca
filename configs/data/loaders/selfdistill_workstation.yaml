@@ -1,0 +1,41 @@
+# Loader settings for self-distillation on the WORKSTATION (8 cores / 16 threads).
+#
+# Same shape as selfdistill.yaml; only num_workers differs. That file's values (5/2)
+# are sized for a Nibi allocation, where cores come in a fixed ratio to the GPU — 6
+# cores for a 3g.40gb slice. This box is not rationed that way.
+#
+# There is deliberately NO selfdistill_cluster.yaml to match: the cluster count is
+# computed at submit time from the actual allocation
+# (slurm/selfdistill/selfdistill.sh derives NWORKERS=$SLURM_CPUS_PER_TASK-1 and
+# passes data.loaders.train.num_workers on the command line). A checked-in cluster
+# file would be overridden on every run and would silently drift from the real value.
+#
+# Why worker count is the knob that matters: the kaldi fbank moved out of the model
+# and into the dataset, so it runs in these workers — and each item costs TWO fbanks
+# (teacher and student views) on top of two wav decodes and two resamples, since
+# AddBackgroundNoise pulls a second clip at p=0.8. Clips are staged at their SOURCE
+# sample rate, so high-SR hydrophones pay a resample on every item of every epoch.
+#
+# 10 + 2 = 12 live worker processes (persistent_workers keeps the val workers alive
+# through training too, so the two counts add), leaving headroom on 16 threads for
+# the main process and the GPU feed. No intra-op oversubscription: pytorch's
+# DataLoader sets torch.set_num_threads(1) inside workers.
+train:
+  num_workers: 10
+  batch_size: 32
+  shuffle: true
+  drop_last: true
+  persistent_workers: true
+  pin_memory: true
+
+val:
+  num_workers: 2
+  batch_size: 32
+  shuffle: false
+  persistent_workers: true
+  pin_memory: true
+
+test:
+  num_workers: 2
+  batch_size: 32
+  shuffle: false

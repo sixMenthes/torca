@@ -13,7 +13,8 @@
 #
 # Steps:
 #   prestage  download 3s clips + write the cached manifest   (do this FIRST)
-#   ckpt      load Bird-MAE-B at target_length=304            (never yet run for real)
+#   manifest  rewrite the manifest from what is already on disk, no download
+#   ckpt      load Bird-MAE-B at target_length=304
 #   smoke     fast_dev_run of both arms on real data
 #   probes    MFCC floor + frozen controls  <- the no-training cells live here
 #   train     a real Bird-MAE run (only if you want one locally)
@@ -28,6 +29,10 @@ PARQUET="${PARQUET:-$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet}"
 BIRDMAE_CKPT="${BIRDMAE_CKPT:-$PROJECT_ROOT/pretrained/Bird-MAE-B}"
 BEATS_CKPT="${BEATS_CKPT:-$PROJECT_ROOT/pretrained/BEATs_iter3.pt}"
 CLIP_DURATION="${CLIP_DURATION:-3.0}"                   # MUST match data.dataset.clip_duration
+# MUST match data.dataset.manifest_name in BOTH dclde_selfdistill_*.yaml. Named per
+# clip_duration because clips are {start_ms}-{end_ms}.wav: a 5s stage and a 3s stage
+# share no files, so a shared manifest name would let one masquerade as the other.
+MANIFEST_NAME="${MANIFEST_NAME:-DCLDE_3secs.parquet}"
 WORKERS="${WORKERS:-32}"
 # ==========================================================================
 
@@ -41,28 +46,50 @@ STEPS=("$@")
 runs() { [[ " ${STEPS[*]} " == *" $1 "* ]]; }
 banner() { echo; echo "=================== $1 ==================="; date; }
 
+# Shared overrides. Every entry point needs the data location and the parquet, since
+# the configs' defaults point at paths that only exist on the original dev box.
+COMMON=(
+  paths.dataset_dir="$DATA_DIR"
+  data.dataset.parquet_path="$PARQUET"
+  data.dataset.manifest_name="$MANIFEST_NAME"
+)
+
 # --- 1. clips -------------------------------------------------------------
 # Everything downstream is silently wrong without this: LocalPath encodes the
 # window as {start_ms}-{end_ms}.wav, so clips staged at 5s are INVISIBLE to a 3s
 # run (zero filename overlap out of 206k). prepare_data then skips downloading,
-# every row misses, collate_fn_skip returns None, and you train on empty batches
-# with no error. --verify afterwards is the check that this actually happened.
+# every row misses, collate_fn_skip returns None, and every batch is dropped.
+# --verify afterwards is the check that this actually happened; it writes nothing.
 if runs prestage; then
   banner "PRESTAGE  clip_duration=$CLIP_DURATION"
   python prestage_clips.py \
       --parquet "$PARQUET" \
       --dataset-dir "$DATA_DIR" \
       --clip-duration "$CLIP_DURATION" \
+      --manifest-name "$MANIFEST_NAME" \
       --workers "$WORKERS"
   python prestage_clips.py --parquet "$PARQUET" --dataset-dir "$DATA_DIR" \
-      --clip-duration "$CLIP_DURATION" --verify
+      --clip-duration "$CLIP_DURATION" --manifest-name "$MANIFEST_NAME" --verify
+fi
+
+# --- 1b. manifest only ----------------------------------------------------
+# For when the clips already landed but the manifest did not, or landed under an
+# older name: one os.walk over the tree, no downloading, no re-stat storm. This is
+# also the cheap repair after an interrupted prestage.
+if runs manifest; then
+  banner "MANIFEST ONLY  -> $DATA_DIR/$MANIFEST_NAME"
+  python prestage_clips.py \
+      --parquet "$PARQUET" \
+      --dataset-dir "$DATA_DIR" \
+      --clip-duration "$CLIP_DURATION" \
+      --manifest-name "$MANIFEST_NAME" \
+      --manifest-only
 fi
 
 # --- 2. does the backbone actually load at 304? ---------------------------
-# The general-length branch in VIT.load_pretrained_weights has only ever been
-# tested against a synthetic 512-length checkpoint. Watch the [audiomae] lines:
-# pos_embed SHOULD be dropped (it is fixed sincos, regenerated at this grid);
-# anything ELSE in the missing list means the backbone is partly random.
+# Watch the [audiomae] lines: pos_embed SHOULD be dropped (it is fixed sincos,
+# regenerated at this grid); anything ELSE in the missing list means the backbone
+# is partly random, which reads exactly like "self-distillation doesn't work".
 if runs ckpt; then
   banner "CHECKPOINT SANITY"
   CLIP=$(find "$DATA_DIR" -name '*.wav' | head -1)
@@ -71,48 +98,60 @@ if runs ckpt; then
 fi
 
 # --- 3. does the loop run on REAL data? -----------------------------------
+# experiment=... rather than module/network=...: the fbank front-end now runs in the
+# dataloader workers, so the backbone is selected by data/dataset AND module/network
+# together. The experiment configs bind the pair; a bare network override would leave
+# the dataset building the other backbone's fbank (the datamodule raises, but only
+# because someone added a cross-check for exactly this).
 if runs smoke; then
   banner "FAST_DEV_RUN  Bird-MAE"
   python train_selfdistill.py trainer.fast_dev_run=true \
-      paths.dataset_dir="$DATA_DIR" \
-      data.dataset.parquet_path="$PARQUET" \
-      module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT"
+      experiment=selfdistill_birdmae \
+      module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT" \
+      "${COMMON[@]}"
 
   banner "FAST_DEV_RUN  BEATs"
   python train_selfdistill.py trainer.fast_dev_run=true \
-      module/network=mim_distillation_beats \
-      paths.dataset_dir="$DATA_DIR" \
-      data.dataset.parquet_path="$PARQUET" \
-      module.network.encoder.pretrained_weights_path="$BEATS_CKPT"
+      experiment=selfdistill_beats \
+      module.network.encoder.pretrained_weights_path="$BEATS_CKPT" \
+      "${COMMON[@]}"
 fi
 
 # --- 4. the no-training cells --------------------------------------------
 # These need no adaptation and no queue, so they establish the floor and the
 # frozen controls while the cluster jobs are still pending.
+#
+# probe.yaml has no `experiment` group, and does not need one: probing never builds
+# a front-end from the dataset config (the encoder applies its own), so only
+# module/network matters here and the dataset choice is irrelevant.
 if runs probes; then
   banner "PROBE  C0: MFCC floor"
-  python probe_selfdistill.py source=mfcc \
-      paths.dataset_dir="$DATA_DIR" data.dataset.parquet_path="$PARQUET"
+  python probe_selfdistill.py source=mfcc "${COMMON[@]}"
 
   banner "PROBE  C2: Bird-MAE frozen"
   python probe_selfdistill.py source=frozen \
-      paths.dataset_dir="$DATA_DIR" data.dataset.parquet_path="$PARQUET" \
-      module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT"
+      module/network=mim_distillation \
+      module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT" \
+      "${COMMON[@]}"
 
   banner "PROBE  C1: BEATs frozen"
   python probe_selfdistill.py source=frozen \
       module/network=mim_distillation_beats \
-      paths.dataset_dir="$DATA_DIR" data.dataset.parquet_path="$PARQUET" \
-      module.network.encoder.pretrained_weights_path="$BEATS_CKPT"
+      module.network.encoder.pretrained_weights_path="$BEATS_CKPT" \
+      "${COMMON[@]}"
 fi
 
 # --- 5. optional: a real local run ---------------------------------------
+# task_name has to be set here rather than in the experiment file: _self_ is LAST in
+# selfdistill.yaml's defaults, so that file's own task_name would win over one set in
+# an experiment config. It also names the MLflow experiment (logger.experiment_name).
 if runs train; then
   banner "TRAIN  Bird-MAE (local)"
   python train_selfdistill.py \
-      paths.dataset_dir="$DATA_DIR" \
-      data.dataset.parquet_path="$PARQUET" \
-      module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT"
+      experiment=selfdistill_birdmae \
+      task_name=selfdistill_birdmae \
+      module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT" \
+      "${COMMON[@]}"
 fi
 
 banner "DONE"
