@@ -1,0 +1,48 @@
+# EMA self-distillation (iBOT-shaped, FSQ targets) — Bird-MAE arm.
+# The BEATs arm is mim_distillation_beats.yaml; the ONLY differences there are the
+# backbone and its native sample rate, which is the point: one recipe on both
+# backbones makes adaptation a homogeneous on/off treatment instead of a confound.
+name: MIMDistillation
+
+# Read by data/transform/ssl_fbank_dclde.yaml, so the dataset resamples to whatever
+# the backbone was pretrained at (Bird-MAE 32 kHz, BEATs 16 kHz).
+sampling_rate: 32000
+
+encoder:
+  name: BirdMAE
+  target_length: ${data.transform.target_length}
+  sample_rate: ${module.network.sampling_rate}
+  num_mel_bins: 128
+  fbank_mean: ${data.dataset.mean}
+  fbank_std: ${data.dataset.std}
+  pretrained_weights_path: /home/tundra/projects/torca/pretrained/Bird-MAE-B
+
+tokenizer:
+  # Grow the codebook through prod(levels), not through L: more dimensions make the
+  # CE harder without adding resolution. (8,6,5) = 240 codes is a starting point, and
+  # deliberately small — watch train/codebook_frac before enlarging it.
+  levels: [8, 6, 5]
+  hidden_dim: 512
+
+distill:
+  mask_ratio: 0.6
+  # Logits are -||z - code||^2 / temperature. At temperature=1 a PERFECT student still
+  # pays CE 3.9 against a chance level of 5.5 (measured), i.e. the objective is mostly
+  # an irreducible floor and the gradient is diffuse. 0.05 drops that floor to ~0.9.
+  temperature: 0.05
+  ema_decay: 0.996
+  ema_decay_end: 0.9999      # ramped over training; null to hold ema_decay constant
+  # Keep zero-padded positions out of the loss. 90% of DCLDE clips are shorter than
+  # the 3 s window, so ~44% of positions are synthetic silence; without this the CE is
+  # dominated by predicting one constant "silence" code. Set false ONLY after
+  # re-slicing clips as centred context windows.
+  mask_padding: true
+  ce_weight: 1.0
+  var_weight: 1.0
+  cov_weight: 0.04
+  # Complementary half of the variance decomposition: the global term can be satisfied
+  # by between-clip spread alone, so this is what forbids "every token in this clip is
+  # identical". Off by default; turn on if codebook_frac stays high but masked_acc is
+  # suspiciously easy.
+  within_clip_var_weight: 0.0
+  gamma: 1.0

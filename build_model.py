@@ -22,6 +22,20 @@ def instantiate_callbacks(cfg_callbacks: DictConfig):
 
 def build_model(cfg_module: DictConfig, label_map: dict, class_weights=None):
 
+    if cfg_module.network.name == "MIMDistillation":
+        # imported lazily: this is the only entry point that needs it, and it pulls in
+        # both backbones. label_map/class_weights are unused — the objective is
+        # self-supervised.
+        from mim_distillation import MIMDistillation
+
+        net = cfg_module.network
+        return MIMDistillation(
+            encoder_cfg=net.encoder,
+            tokenizer_cfg=net.tokenizer,
+            optimizer_cfg=cfg_module.optimizer,
+            distill_cfg=net.distill,
+        )
+
     if cfg_module.network.name == "FSQNet":
         net = cfg_module.network
         return FSQNet(

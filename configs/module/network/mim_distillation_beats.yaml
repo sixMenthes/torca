@@ -1,0 +1,32 @@
+# EMA self-distillation — BEATs arm. Identical recipe to mim_distillation.yaml;
+# only the backbone and its native sample rate change.
+name: MIMDistillation
+
+sampling_rate: 16000          # BEATs' own fbank is 16 kHz
+
+encoder:
+  name: BEATs
+  sample_rate: ${module.network.sampling_rate}
+  # Use the plain SSL iter3 checkpoint, NOT iter3+AS20K: the study compares SSL to
+  # SSL, and the AS20K-finetuned variant would smuggle supervised AudioSet labels in
+  # as a confound.
+  pretrained_weights_path: /home/tundra/projects/torca/pretrained/BEATs_iter3.pt
+  # BEATs' own fbank normalisation, not DCLDE's — it ships with the checkpoint.
+  fbank_mean: 15.41663
+  fbank_std: 6.55582
+
+tokenizer:
+  levels: [8, 6, 5]
+  hidden_dim: 512
+
+distill:
+  mask_ratio: 0.6
+  temperature: 0.05
+  ema_decay: 0.996
+  ema_decay_end: 0.9999
+  mask_padding: true
+  ce_weight: 1.0
+  var_weight: 1.0
+  cov_weight: 0.04
+  within_clip_var_weight: 0.0
+  gamma: 1.0

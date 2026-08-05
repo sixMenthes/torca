@@ -1,0 +1,35 @@
+# @package _global_
+# Linear-probe evaluation of a representation — the readout stage of the study.
+# Trains nothing except the probe itself, so what it reports is a property of the
+# REPRESENTATION rather than of a fitted head.
+#
+#   python probe_selfdistill.py source=mfcc                       # non-neural floor
+#   python probe_selfdistill.py source=frozen                     # unadapted control
+#   python probe_selfdistill.py source=adapted ckpt_path=...      # adapted cell
+#   python probe_selfdistill.py source=frozen 'layers=[0,3,7,11]' # depth sweep
+defaults:
+  - data/dataset: dclde_selfdistill
+  - data/loaders: default
+  - data/transform: ssl_fbank_dclde
+  - hydra: workstation
+  - module/network: mim_distillation
+  - paths: workstation
+  - _self_
+
+# mfcc | frozen | adapted
+source: frozen
+ckpt_path: null
+
+# Which encoder blocks to pool from. null = final output (the headline metric).
+# A list sweeps depth: recording condition is a low-level property, so the confound
+# plausibly sits in early blocks — watching nuisance decodability fall across depth
+# after adaptation is a mechanism result, not just an endpoint.
+layers: null
+
+n_mfcc: 40
+batch_size: 32
+num_workers: 4
+device: cuda
+
+seed: 59
+task_name: "probe"

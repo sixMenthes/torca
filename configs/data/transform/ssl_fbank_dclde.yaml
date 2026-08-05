@@ -1,0 +1,66 @@
+# Transform config for the self-distillation (SSL adaptation) runs.
+#
+# Differs from melbank_dclde.yaml in kind, not just in numbers: the SSL datamodule
+# serves raw WAVEFORMS and the front-end lives inside the model, so this file is
+# mostly a parameter block for the model's KaldiFbank plus the two fields the
+# datamodule actually reads (input.sample_rate, clip_duration).
+#
+# 3 s @ 10 ms frame shift = 300 frames, padded to target_length 304 so it divides
+# by the patch size (304/16 = 19 -> a 19x8 = 152-patch grid). 304 not 288: the
+# transform pads and never crops, so rounding DOWN would throw away call energy.
+#
+# sample_rate follows the backbone (Bird-MAE 32 kHz, BEATs 16 kHz) and the dataset
+# resamples to it — that is why it interpolates rather than being hard-coded.
+
+input:
+  type: fbank
+  sample_rate: ${module.network.sampling_rate}
+  htk_compat: true
+  use_energy: false
+  window_type: hanning
+  num_mel_bins: 128
+  dither: 0.0
+  frame_shift: 10
+  # (fbank - mean) / (2*std), Bird-MAE's convention. These are torca's DCLDE stats;
+  # for a FROZEN baseline they should be Bird-MAE's XCL pretraining stats instead
+  # (still unconfirmed — they live in the feature extractor, not in any yaml).
+  mean: ${data.dataset.mean}
+  std: ${data.dataset.std}
+
+clip_duration: ${data.dataset.clip_duration}
+target_length: 304
+
+# Two-view augmentation. The ASYMMETRY is the de-confounding lever, not the strength:
+# the teacher sees the clip clean and the student sees it buried in noise from a
+# DIFFERENT hydrophone, so the only way to predict the teacher's tokens is to become
+# invariant to the recording channel. Leave `teacher` empty unless you specifically
+# want to test a symmetric-view variant.
+#
+# Set any op's p to 0.0 to disable it (the datamodule skips those), which makes
+# ablating a single augmentation a one-flag override.
+augmentations:
+  teacher: {}
+  student:
+    shift:                  # offset jitter, non-cyclic zero-filled
+      p: 0.5
+      max_shift_seconds: 0.1
+    gain:                   # volume jitter
+      p: 0.5
+      min_gain_db: -6.0
+      max_gain_db: 6.0
+    background:             # cross-hydrophone noise — the de-confounding op proper
+      p: 0.8
+      min_snr_db: 0.0
+      max_snr_db: 15.0
+
+# Linear-mel + PCEN is a separate ablation cell and is off on the SSL path by
+# default; PCEN must stay FIXED during adaptation (backprop into it reintroduces
+# the r->0 collapse).
+pcen: false
+
+# Student-view masking is applied to patch embeddings inside the model, not to the
+# spectrogram here. These stay off, and exist because the network configs
+# interpolate them (${data.transform.mask2d} etc.).
+mask2d: False
+mask_t_prob: 0.0
+mask_f_prob: 0.0

@@ -1,0 +1,40 @@
+# @package _global_
+# EMA self-distillation domain adaptation. Self-supervised: no labels, so no
+# module/loss and no module/metric group — the objective lives in MIMDistillation and
+# the readout is a separate linear probe (probe.py) over the adapted features.
+#
+# Swap the backbone arm with:  module/network=mim_distillation_beats
+# NOTE: _self_ is LAST, unlike fsqnet.yaml. Hydra applies the defaults list in order,
+# so with _self_ first the group files would win and the overrides below would be
+# silently ignored (adamw.yaml's lr=1e-3 instead of the 1e-4 this task wants).
+defaults:
+  - callbacks: default_ssl
+  - data/dataset: dclde_selfdistill
+  - data/loaders: default
+  - data/transform: ssl_fbank_dclde
+  - logger: mlflow
+  - hydra: workstation
+  - module/network: mim_distillation
+  - module/optimizer: adamw
+  - paths: workstation
+  - trainer: single_gpu
+  - experiment: null
+  - _self_
+
+module:
+  optimizer:
+    # Cosine schedule with warmup. Warmup matters more than usual here: at the sharp
+    # codebook temperature an untrained projector is confidently wrong, so the first
+    # steps carry large gradients.
+    scheduler: true
+    warmup_ratio: 0.067
+    target:
+      lr: 1e-4        # adaptation, not from-scratch pretraining — keep it low
+
+seed: 59
+
+start_time: ${now:%Y-%m-%d_%H%M%S}
+task_name: "selfdistill"
+
+train: true
+test: false

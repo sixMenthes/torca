@@ -64,16 +64,24 @@ class SelfDistillDataset(Dataset):
         # learn to ignore, not a bug); high-SR downsample. BEATs needs 16 kHz.
         if sr != self.sample_rate:
             wave = AF.resample(wave, sr, self.sample_rate)
-        return self._fit_length(wave)
+        return self._fit_length(wave)          # (wave, n_valid_samples)
 
     def _fit_length(self, wave):
+        """Fit to max_length, and report how much of the result is REAL audio.
+
+        90% of DCLDE clips are shorter than a 3 s window (the slicer cuts
+        [floor(begin), ceil(end)] around each annotation), so the tail padding is the
+        common case, not the exception. The model needs the valid count to keep that
+        synthetic silence out of the loss — without it the padding is
+        indistinguishable from quiet ocean once it reaches the front-end.
+        """
         t = wave.size(-1)
         if t > self.max_length:                                 # center crop
             start = (t - self.max_length) // 2
             wave = wave[..., start:start + self.max_length]
         elif t < self.max_length:                              # zero-pad tail
             wave = F.pad(wave, (0, self.max_length - t))
-        return wave
+        return wave, min(t, self.max_length)
 
     def __getitem__(self, index):
         row = self.df.row(index, named=True)
@@ -81,10 +89,16 @@ class SelfDistillDataset(Dataset):
         if not os.path.exists(path):
             log.warning(f"Failed loading file \t {path}")
             return None
-        wave = self._load_wave(path)
+        wave, n_valid = self._load_wave(path)
         # clone() so the two aug pipelines can't alias the same underlying tensor
         return {
             "teacher": self.teacher_aug(wave.clone()),
             "student": self.student_aug(wave.clone()),
             "dataset": row["Dataset"],
+            # samples of real audio before tail padding; the model turns this into a
+            # per-patch validity mask. NOTE: RandomShift moves the signal inside the
+            # window, so this is an upper bound on where real audio sits after
+            # augmentation — fine, since the teacher (which defines the targets) sees
+            # the unshifted clean view.
+            "n_valid": n_valid,
         }

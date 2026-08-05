@@ -42,31 +42,49 @@ class SelfDistillDataModule(LabelDataModule):
             .to_list()
         )
 
+    def _build_view_aug(self, view_cfg, sr, max_length, bank):
+        """Build one view's augmentation pipeline from config.
+
+        Ops with p == 0 are dropped entirely rather than constructed-and-skipped, so
+        sweeping a single op off costs one override and doesn't pay for e.g. the
+        background bank's file IO. Order is fixed (shift -> gain -> background):
+        background noise must be mixed at the SNR of the final signal, so it goes last.
+        """
+        ops = []
+        if not view_cfg:
+            return WaveformViewAug(ops)
+
+        shift = view_cfg.get("shift", None)
+        if shift and shift.p > 0:
+            ops.append(RandomShift(
+                max_shift_samples=int(shift.max_shift_seconds * sr), p=shift.p))
+
+        gain = view_cfg.get("gain", None)
+        if gain and gain.p > 0:
+            ops.append(RandomGain(
+                min_gain_db=gain.min_gain_db, max_gain_db=gain.max_gain_db, p=gain.p))
+
+        bg = view_cfg.get("background", None)
+        if bg and bg.p > 0:
+            ops.append(AddBackgroundNoise(
+                background_paths=bank, target_length=max_length, sample_rate=sr,
+                min_snr_db=bg.min_snr_db, max_snr_db=bg.max_snr_db, p=bg.p))
+
+        return WaveformViewAug(ops)
+
     def setup(self, stage: str):
         if stage in ("fit", None):
             sr = int(self.transform_config.input.sample_rate)
             max_length = int(sr * self.transform_config.clip_duration)
             bank = self._ssl_background_bank()
 
-            # Asymmetric views: teacher clean (center crop only), student strong.
-            # This asymmetry is what turns the masked-prediction objective into a
-            # denoising / channel-invariance objective — the cheapest form of the
-            # "multiple views" iBOT/DINO use, no second head or multi-crop yet.
-            teacher_aug = WaveformViewAug([])
-            student_aug = WaveformViewAug(
-                [
-                    RandomShift(max_shift_samples=int(0.1 * sr), p=0.5),
-                    RandomGain(min_gain_db=-6.0, max_gain_db=6.0, p=0.5),
-                    AddBackgroundNoise(
-                        background_paths=bank,
-                        target_length=max_length,
-                        sample_rate=sr,
-                        min_snr_db=0.0,
-                        max_snr_db=15.0,
-                        p=0.8,
-                    ),
-                ]
-            )
+            # Asymmetric views: teacher clean, student strong. This asymmetry is what
+            # turns the masked-prediction objective into a denoising / channel-
+            # invariance objective — the cheapest form of the "multiple views"
+            # iBOT/DINO use, no second head or multi-crop yet.
+            aug_cfg = self.transform_config.get("augmentations", {})
+            teacher_aug = self._build_view_aug(aug_cfg.get("teacher", {}), sr, max_length, bank)
+            student_aug = self._build_view_aug(aug_cfg.get("student", {}), sr, max_length, bank)
 
             self.ssl_set = SelfDistillDataset(
                 self.build_selfdistill_set(),
