@@ -26,6 +26,12 @@ ckpt_path: null
 # after adaptation is a mechanism result, not just an endpoint.
 layers: null
 
+# How the probe's regularisation C is chosen. "train_cv" = GroupKFold by hydrophone
+# within the train split (13 hydrophones, and the same procedure the call-type probe
+# uses). "val" = score candidates on the val split instead — CarmanahPt alone, so
+# selection rests on a single recording condition.
+c_selection: train_cv
+
 n_mfcc: 40
 batch_size: 32
 num_workers: 4

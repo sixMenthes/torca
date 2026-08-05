@@ -247,61 +247,68 @@ class LabelDataModule(L.LightningDataModule):
             return pool.with_columns(pl.lit("train").alias("split"))
 
     def load_df(self):
-
-        df = pl.read_parquet(self.parquet_path)
-
-        duration = pl.col("FileEndSec") - pl.col("FileBeginSec")
-        center_time = pl.col("FileBeginSec") + (duration / 2.0)
-        new_start_time = pl.max_horizontal(
-            pl.lit(0), center_time - self.clip_duration / 2.0
-        )
-        new_end_time = new_start_time + self.clip_duration
-
-        df = (
-            df.filter(pl.col("NewFileOk") & (pl.col("Labels") != "KW_und"))
-            .with_columns(
-                duration.alias("true_duration"),
-                center_time.alias("center_time"),
-                new_start_time.alias("new_start_time"),
-                new_end_time.alias("new_end_time"),
-            )
-            .drop(
-                pl.col("FileBeginSec"),
-                pl.col("FileEndSec"),
-                pl.col("Duration"),
-            )
+        return build_clip_manifest(
+            pl.read_parquet(self.parquet_path), self.clip_duration, self.data_dir
         )
 
-        stem = pl.col("Soundfile").str.replace(r"\.[^.]+$", "")
-        start_ms = (
-            (pl.col("new_start_time") * 1000)
-            .round()
-            .cast(pl.Int64)
-            .cast(pl.String)
-            .str.zfill(10)
-        )
-        end_ms = (
-            (pl.col("new_end_time") * 1000)
-            .round()
-            .cast(pl.Int64)
-            .cast(pl.String)
-            .str.zfill(10)
-        )
 
-        local_path = pl.format(
-            "{}/{}/{}/{}/{}-{}{}",
-            pl.lit(self.data_dir),
-            pl.col("Provider"),
-            pl.col("Dataset"),
-            stem,
-            start_ms,
-            end_ms,
-            pl.lit(".wav"),
-        )
+def build_clip_manifest(df, clip_duration, data_dir):
+    """Annotation rows -> centred clip windows + LocalPath. SINGLE SOURCE OF TRUTH.
 
-        return df.rename({"NewPath": "GCSPath"}).with_columns(
-            local_path.alias("LocalPath")
+    Both `LabelDataModule.load_df` and the standalone prestage script call this, and
+    they must: `LocalPath` encodes the window as `{start_ms}-{end_ms}.wav`, so any
+    divergence in how the window is computed silently renames every clip. The
+    datamodule then finds nothing on disk, every row returns None, `collate_fn_skip`
+    returns None, and you get empty batches rather than an error. Changing
+    `clip_duration` renames every file for the same reason — a 5 s prestage does not
+    serve a 3 s run.
+
+    The window is centred on the annotation's midpoint and clamped at the file start,
+    so clips carry real recorded context rather than padding; only annotations near a
+    file's end come up short.
+    """
+    duration = pl.col("FileEndSec") - pl.col("FileBeginSec")
+    center_time = pl.col("FileBeginSec") + (duration / 2.0)
+    new_start_time = pl.max_horizontal(pl.lit(0), center_time - clip_duration / 2.0)
+    new_end_time = new_start_time + clip_duration
+
+    df = (
+        df.filter(pl.col("NewFileOk") & (pl.col("Labels") != "KW_und"))
+        .with_columns(
+            duration.alias("true_duration"),
+            center_time.alias("center_time"),
+            new_start_time.alias("new_start_time"),
+            new_end_time.alias("new_end_time"),
         )
+        .drop(
+            pl.col("FileBeginSec"),
+            pl.col("FileEndSec"),
+            pl.col("Duration"),
+        )
+    )
+
+    stem = pl.col("Soundfile").str.replace(r"\.[^.]+$", "")
+    start_ms = (
+        (pl.col("new_start_time") * 1000).round().cast(pl.Int64).cast(pl.String)
+        .str.zfill(10)
+    )
+    end_ms = (
+        (pl.col("new_end_time") * 1000).round().cast(pl.Int64).cast(pl.String)
+        .str.zfill(10)
+    )
+
+    local_path = pl.format(
+        "{}/{}/{}/{}/{}-{}{}",
+        pl.lit(data_dir),
+        pl.col("Provider"),
+        pl.col("Dataset"),
+        stem,
+        start_ms,
+        end_ms,
+        pl.lit(".wav"),
+    )
+
+    return df.rename({"NewPath": "GCSPath"}).with_columns(local_path.alias("LocalPath"))
 
 
 def stratified_sampling(

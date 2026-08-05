@@ -119,6 +119,7 @@ class MIMDistillation(L.LightningModule):
         self.cov_weight = distill_cfg.get("cov_weight", 0.04)
         self.within_clip_var_weight = distill_cfg.get("within_clip_var_weight", 0.0)
         self.gamma = distill_cfg.get("gamma", 1.0)
+        self.val_seed = distill_cfg.get("val_seed", 59)
 
     def _build_branch(self, encoder_cfg, tokenizer_cfg, levels):
         """One encoder+projector branch. Called twice (student, teacher)."""
@@ -226,6 +227,51 @@ class MIMDistillation(L.LightningModule):
                 "train/ema_decay": self._current_decay(),
             },
             prog_bar=True, on_step=True, on_epoch=True, batch_size=student_wave.shape[0],
+        )
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        """Same objective on a held-out RECORDING CONDITION (CarmanahPt).
+
+        The mask is drawn from a generator seeded by batch index, so the same patches
+        are hidden every epoch. Combined with the dataset's deterministic augmentation
+        that makes the val curve move only when the model moves — otherwise a fresh
+        noise draw and a fresh mask each epoch add variance that swamps the signal you
+        are trying to read.
+        """
+        student_wave, teacher_wave = batch["student"], batch["teacher"]
+
+        target_indices = self.teacher_forward(teacher_wave)
+        valid = self._valid_mask(batch, target_indices.shape[1], student_wave.device)
+
+        gen = torch.Generator(device=student_wave.device)
+        gen.manual_seed(self.val_seed + batch_idx)
+        student_mask = sample_student_mask(valid, self.mask_ratio, generator=gen)
+
+        z = self(student_wave, mask=student_mask)
+        logits = codebook_logits(z, self.fsq, self.temperature)
+
+        ce = masked_ce(logits, target_indices, student_mask)
+        vic, vic_parts = vicreg(
+            z, valid, gamma=self.gamma, var_weight=self.var_weight,
+            cov_weight=self.cov_weight,
+            within_clip_var_weight=self.within_clip_var_weight,
+        )
+        loss = self.ce_weight * ce + vic
+
+        used = target_indices[valid].unique().numel()
+        acc = (logits.argmax(-1) == target_indices)[student_mask].float().mean()
+        self.log_dict(
+            {
+                "val/loss": loss,
+                "val/ce": ce,
+                # codebook usage on a channel the model never adapted on — a stronger
+                # collapse signal than the training-set version
+                "val/codebook_frac": used / self.fsq.codebook_size,
+                "val/masked_acc": acc,
+            },
+            prog_bar=True, on_step=False, on_epoch=True,
+            batch_size=student_wave.shape[0], sync_dist=True,
         )
         return loss
 

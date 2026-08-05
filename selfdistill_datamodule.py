@@ -94,6 +94,22 @@ class SelfDistillDataModule(LabelDataModule):
                 max_length=max_length,
             )
 
+            # Held-out RECORDING CONDITION (CarmanahPt), which is the right thing to
+            # monitor for an invariance objective: it answers "is the masked-prediction
+            # task improving on a channel the model never adapted on", not just on the
+            # training channels. Same augmentation policy as training (the student view
+            # keeps cross-hydrophone noise, so this measures denoising of an unseen
+            # channel), but deterministic — each clip is augmented and masked
+            # identically every epoch, so the curve moves only when the model does.
+            self.val_ssl_set = SelfDistillDataset(
+                self.df.filter(pl.col("Dataset").is_in(self.val_hydros)),
+                teacher_aug,
+                student_aug,
+                sample_rate=sr,
+                max_length=max_length,
+                deterministic=True,
+            )
+
     def train_dataloader(self):
         return DataLoader(
             self.ssl_set,
@@ -103,4 +119,42 @@ class SelfDistillDataModule(LabelDataModule):
             persistent_workers=self.train_loader_configs.persistent_workers,
             pin_memory=self.train_loader_configs.pin_memory,
             collate_fn=collate_fn_skip,
+        )
+
+    def val_dataloader(self):
+        """Two-view val loader. MUST override the inherited one.
+
+        LabelDataModule.val_dataloader returns a loader over `self.val_set`, which this
+        datamodule never builds — so the moment a validation_step exists, the inherited
+        version raises AttributeError. shuffle=False keeps batch composition fixed
+        across epochs, which the deterministic augmentation relies on.
+        """
+        return DataLoader(
+            self.val_ssl_set,
+            num_workers=self.val_loader_configs.num_workers,
+            batch_size=self.val_loader_configs.batch_size,
+            shuffle=False,
+            persistent_workers=self.val_loader_configs.persistent_workers,
+            pin_memory=self.val_loader_configs.pin_memory,
+            collate_fn=collate_fn_skip,
+        )
+
+    def probe_dataloader(self, batch_size=32):
+        """LABELLED val clips for the online ecotype probe.
+
+        Single hydrophone by design: with recording condition held constant, the probe
+        cannot exploit a channel shortcut, so it is a clean read on whether ecotype is
+        linearly separable — which is exactly the quantity the adaptation is supposed
+        to improve.
+        """
+        from probe_features import build_loader
+
+        labelled = self.df.filter(
+            pl.col("Dataset").is_in(self.val_hydros)
+            & pl.col("Labels").is_in(list(self.labels))
+        )
+        return build_loader(
+            labelled, int(self.transform_config.input.sample_rate),
+            self.clip_duration, self.label_map, self.call_map,
+            batch_size=batch_size, num_workers=self.val_loader_configs.num_workers,
         )

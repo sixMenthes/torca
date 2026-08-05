@@ -43,12 +43,19 @@ class SelfDistillDataset(Dataset):
     diagnostics can group by recording condition.
     """
 
-    def __init__(self, df, teacher_aug, student_aug, sample_rate, max_length):
+    def __init__(self, df, teacher_aug, student_aug, sample_rate, max_length,
+                 deterministic=False, seed=59):
         self.df = df
         self.teacher_aug = teacher_aug
         self.student_aug = student_aug
         self.sample_rate = int(sample_rate)
         self.max_length = int(max_length)
+        # deterministic=True: every clip gets the SAME augmentation every epoch, so a
+        # validation curve reflects the model changing rather than the noise draw
+        # changing. All three augmentations use torch's global RNG (torch.rand /
+        # randint / empty().uniform_), so seeding it per item is sufficient.
+        self.deterministic = deterministic
+        self.seed = int(seed)
 
     def __len__(self):
         return self.df.height
@@ -91,6 +98,16 @@ class SelfDistillDataset(Dataset):
             return None
         wave, n_valid = self._load_wave(path)
         # clone() so the two aug pipelines can't alias the same underlying tensor
+        if self.deterministic:
+            # fork_rng(devices=[]) forks only the CPU generator — augmentation runs in
+            # dataloader workers on CPU — and restores it after, so seeding here can't
+            # perturb the training RNG stream.
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(self.seed + index)
+                teacher = self.teacher_aug(wave.clone())
+                student = self.student_aug(wave.clone())
+            return {"teacher": teacher, "student": student,
+                    "dataset": row["Dataset"], "n_valid": n_valid}
         return {
             "teacher": self.teacher_aug(wave.clone()),
             "student": self.student_aug(wave.clone()),

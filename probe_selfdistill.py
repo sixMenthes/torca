@@ -118,40 +118,64 @@ def run(cfg: DictConfig):
             for l in layers
         }
 
-    header = (f"{'cell':>10} {'dim':>6} {'task/ecotype':>14} {'nuisance/hydro':>16} "
+    # Background index drives the nuisance probe's channel-only restriction.
+    bg_index = dm.label_map.get("Background", -1)
+    if bg_index < 0:
+        log.warning("no 'Background' class in label_map — nuisance probe will fail")
+
+    header = (f"{'cell':>10} {'dim':>6} {'task/ecotype':>14} {'nuisance/bg':>16} "
               f"{'calltype':>10}")
     print("\n" + header)
     print("-" * len(header))
     chance = None
 
     for name, (X, meta) in cells.items():
-        report = probe_lib.diagnose(
-            X,
-            task_labels={"ecotype": meta["label"]},
-            nuisance_labels={"hydro": meta["hydrophone"]},
-            hydrophone=meta["hydrophone"],
+        # TASK: fit on train hydros, pick C on val, evaluate once on the held-out test
+        # hydros. NOT GroupKFold over everything — that leaks adaptation-train
+        # hydrophones into the probe's test folds and hands the adapted cell an
+        # advantage the frozen control never gets.
+        task = probe_lib.probe_split_protocol(
+            X, meta["label"], tags, hydrophone=meta["hydrophone"],
+            c_selection=cfg.c_selection,
         )
-        task = report["task/ecotype"]
-        nuis = report["nuisance/hydro"]
+        # NUISANCE: hydrophone decodability from BACKGROUND clips only, on train.
+        # Background-only is what makes it a channel measurement rather than a content
+        # one — see probe.probe_nuisance_background.
+        nuis = probe_lib.probe_nuisance_background(
+            X, meta["hydrophone"], tags, meta["label"] == bg_index
+        )
 
-        # Call-type: train-on-train / eval-on-test (decision 1.a), restricted to rows
-        # that actually carry a call-type label.
+        # CALL-TYPE: train-on-train / eval-on-test, C chosen by GroupKFold over the
+        # train call-type hydrophones (val carries no call-type labels at all).
         ct = "n/a"
         has_call = meta["call"] >= 0
         train_m = has_call & (tags == "train")
         test_m = has_call & (tags == "test")
         if train_m.sum() > 0 and test_m.sum() > 0:
-            r = probe_lib.probe_fixed_split(X, meta["call"], train_m, test_m)
+            ct_C, _ = probe_lib.select_C(
+                X[train_m], meta["call"][train_m], meta["hydrophone"][train_m]
+            )
+            r = probe_lib.probe_fixed_split(X, meta["call"], train_m, test_m, C=ct_C)
             ct = f"{r['balanced_acc']:.3f}"
 
         print(f"{name:>10} {X.shape[1]:>6} "
-              f"{task['balanced_acc']:>9.3f}±{task['std']:.2f} "
+              f"{task['balanced_acc']:>14.3f} "
               f"{nuis['balanced_acc']:>11.3f}±{nuis['std']:.2f} "
               f"{ct:>10}")
+        if task["per_hydrophone"]:
+            per = "  ".join(f"{k}={v:.3f}" for k, v in task["per_hydrophone"].items())
+            print(f"{'':>10} per test hydrophone: {per}  (C={task['C']})")
         chance = (task["majority_baseline"], nuis["majority_baseline"])
 
     if chance:
-        print(f"\nchance: ecotype {chance[0]:.3f}, hydrophone {chance[1]:.3f}")
+        print(f"\nchance: ecotype {chance[0]:.3f} (test split), "
+              f"hydrophone {chance[1]:.3f} "
+              f"({nuis['n_hydrophones']} hydros, {nuis['n_clips']} Background clips)")
+        print(f"n_train={task['n_train']} n_test={task['n_test']} "
+              f"(C selected by {cfg.c_selection})")
+        print("nuisance = hydrophone decodability from BACKGROUND clips only, so it "
+              "measures channel, not content.\nCompare frozen vs adapted; the drop is "
+              "the result. The background.p=0.0 run is the control that attributes it.")
     print("Win = task UP and nuisance DOWN, jointly. Task alone selects cells that "
           "adapted deeper into the confound.")
 

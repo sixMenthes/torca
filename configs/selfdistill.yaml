@@ -8,7 +8,7 @@
 # so with _self_ first the group files would win and the overrides below would be
 # silently ignored (adamw.yaml's lr=1e-3 instead of the 1e-4 this task wants).
 defaults:
-  - callbacks: default_ssl
+  - callbacks: selfdistill
   - data/dataset: dclde_selfdistill
   - data/loaders: default
   - data/transform: ssl_fbank_dclde
@@ -20,6 +20,16 @@ defaults:
   - trainer: single_gpu
   - experiment: null
   - _self_
+
+# Select checkpoints on the held-out recording condition rather than just keeping the
+# latest epoch. val/loss is the same objective computed on CarmanahPt, which the model
+# never adapts on.
+callbacks:
+  model_checkpoint:
+    monitor: val/loss
+    mode: min
+    save_top_k: 1
+    save_last: true
 
 module:
   optimizer:

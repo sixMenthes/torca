@@ -1,0 +1,8 @@
+# Callbacks for the self-distillation run. Separate from default_ssl so that adding
+# the online probe here cannot affect the FSQNet runs that share default_ssl.
+defaults:
+  - _self_
+  - lr_monitor
+  - progress_bar
+  - model_checkpoint
+  - online_probe

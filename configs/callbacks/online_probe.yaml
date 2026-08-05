@@ -1,0 +1,10 @@
+online_probe:
+  _target_: online_probe.OnlineProbe
+  # A forward pass over the labelled val clips (~1.8k for CarmanahPt). Cheap, but not
+  # free — raise this if it noticeably slows the run.
+  every_n_epochs: 1
+  # null = final encoder output. An int probes that block instead, which is how you
+  # watch the confound move across depth during training rather than only after.
+  layer: null
+  max_clips: null
+  C: 1.0
