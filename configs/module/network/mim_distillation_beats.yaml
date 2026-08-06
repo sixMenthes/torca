@@ -16,7 +16,9 @@ encoder:
   fbank_std: 6.55582
 
 tokenizer:
-  levels: [8, 6, 5]
+  # MUST match mim_distillation.yaml — see there for why [8,5,5,5]. Identical on both
+  # arms or adaptation stops being a homogeneous treatment.
+  levels: [8, 5, 5, 5]
   hidden_dim: 512
 
 distill:

@@ -18,10 +18,25 @@ encoder:
   pretrained_weights_path: /home/tundra/projects/torca/pretrained/Bird-MAE-B
 
 tokenizer:
-  # Grow the codebook through prod(levels), not through L: more dimensions make the
-  # CE harder without adding resolution. (8,6,5) = 240 codes is a starting point, and
-  # deliberately small — watch train/codebook_frac before enlarging it.
-  levels: [8, 6, 5]
+  # The FSQ paper's recommended level set for a 2^10 target, chosen to sit near BEATs'
+  # own ~1024-entry acoustic-tokenizer codebook so vocabulary size is comparable.
+  # (8,6,5)=240 was the paper's 2^8 config and is what every measurement before
+  # 2026-08-06 used — nothing at 240 is comparable to a run at 1000.
+  #
+  # tau does NOT need re-deriving: it scales as (1/max_d(levels_d//2))^2, set by the
+  # FINEST axis, and the 8-axis gives 4 in both configs. That is not automatic —
+  # [8,8,8] has the same tau but pushes the perfect-student CE floor from 0.59 to
+  # 1.23, because every axis then sits at the finest spacing.
+  #
+  # Measured floor@tau=0.05 0.442, chance ln(1000)=6.908, ceiling log2(1000)=9.97,
+  # bf16 index error 0.14% (unchanged from 240 — it is a boundary-rounding rate, not
+  # a function of codebook size).
+  #
+  # NOTE the old comment here said to grow through prod(levels) rather than L, on the
+  # grounds that more dimensions make the CE harder without adding resolution. That is
+  # not what measurement shows: L=4 at these levels gives a LOWER floor than L=3 at
+  # [8,8,8], because three coarse axes put non-neighbour codes further apart.
+  levels: [8, 5, 5, 5]
   hidden_dim: 512
 
 distill:
