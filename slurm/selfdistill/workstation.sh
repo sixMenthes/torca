@@ -105,13 +105,13 @@ fi
 # because someone added a cross-check for exactly this).
 if runs smoke; then
   banner "FAST_DEV_RUN  Bird-MAE"
-  python train_selfdistill.py trainer.fast_dev_run=true \
+  python train_selfdistill.py +trainer.fast_dev_run=true \
       experiment=selfdistill_birdmae \
       module.network.encoder.pretrained_weights_path="$BIRDMAE_CKPT" \
       "${COMMON[@]}"
 
   banner "FAST_DEV_RUN  BEATs"
-  python train_selfdistill.py trainer.fast_dev_run=true \
+  python train_selfdistill.py +trainer.fast_dev_run=true \
       experiment=selfdistill_beats \
       module.network.encoder.pretrained_weights_path="$BEATS_CKPT" \
       "${COMMON[@]}"

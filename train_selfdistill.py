@@ -2,7 +2,7 @@
 
     python train_selfdistill.py                                  # Bird-MAE arm
     python train_selfdistill.py module/network=mim_distillation_beats   # BEATs arm
-    python train_selfdistill.py trainer.fast_dev_run=true         # smoke test
+    python train_selfdistill.py +trainer.fast_dev_run=true         # smoke test
 
 Mirrors train_fsqnet.py. The one structural difference is that this task is
 self-supervised: the datamodule serves unlabelled two-view waveform pairs, so there

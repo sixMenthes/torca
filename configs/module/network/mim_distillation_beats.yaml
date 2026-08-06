@@ -30,3 +30,9 @@ distill:
   cov_weight: 0.04
   within_clip_var_weight: 0.0
   gamma: 1.0
+  # MUST stay identical to mim_distillation.yaml — one recipe on both backbones is what
+  # makes adaptation a homogeneous on/off treatment rather than a second confound.
+  # See that file for why the entropy penalty exists.
+  diversity_weight: 0.0
+  diversity_sample_weight: 0.0
+  diversity_temperature: null

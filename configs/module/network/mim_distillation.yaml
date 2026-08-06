@@ -46,3 +46,26 @@ distill:
   # suspiciously easy.
   within_clip_var_weight: 0.0
   gamma: 1.0
+  # Entropy penalty on code usage. LFQ/MAGVIT-v2 form; wav2vec 2.0's diversity loss is
+  # the ancestor. 0.0 = off, i.e. the objective as it was.
+  #
+  # Why it is needed: VICReg's variance term measures SPREAD, not coverage, and the
+  # route from z to a code runs through tanh. Drive |z| up and every coordinate
+  # saturates onto the same extreme, which gives huge per-dimension std (vic_var = 0)
+  # and independent axes (vic_cov ~ 0) while every token lands on a cube CORNER.
+  # Measured: 4 codes of 240, 0.43 bits of a 7.91-bit ceiling, both guards reading
+  # healthy throughout. This term penalises that directly.
+  # Start 0.1-1.0; read train/token_bits against log2(K), not codebook_frac.
+  diversity_weight: 0.0
+  # Weight on the E[H(q)] half of the LFQ form. OFF, unlike LFQ: at this sharp a
+  # temperature per-token entropy is already ~0, so it adds nothing and dilutes the
+  # coverage signal. Measured at 1.0 it INVERTS the ordering — a collapsed batch
+  # scores better than a healthy one, because collapsed z sits far from most codes
+  # and so has a sharper per-token softmax. Only useful in softer regimes.
+  diversity_sample_weight: 0.0
+  # null = score coverage at the CE temperature. Counterintuitive but measured: at
+  # 0.05 the ordering across healthy/16/4/1-code cases is monotonic with 0.60 of
+  # separation and the largest gradient (1.4e-4); softening to 1.0 breaks monotonicity
+  # and costs 10x the gradient. q_bar at a sharp temperature IS the code histogram,
+  # which is the quantity we want; softening smears it toward uniform for any input.
+  diversity_temperature: null

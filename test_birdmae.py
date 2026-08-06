@@ -37,7 +37,12 @@ print(f"grid (time, freq) = {encoder.grid_size}, num_patches = {encoder.num_patc
 
 try:
     sw, sr = torchaudio.load_with_torchcodec(WAV)
-except (ImportError, AttributeError):     # torchcodec is optional; the SSL dataset uses soundfile
+except Exception:
+    # torchcodec is optional here; the SSL dataset reads with soundfile anyway.
+    # Catch broadly on purpose: a torchcodec that is INSTALLED but cannot load its
+    # shared library raises RuntimeError, not ImportError. That is the normal state
+    # on ROCm — the published torchcodec wheels link CUDA, so loading dies on a
+    # missing libnvrtc regardless of which FFmpeg is present.
     import soundfile as sf
     audio, sr = sf.read(WAV, dtype="float32", always_2d=True)
     sw = torch.from_numpy(audio).T

@@ -4,7 +4,11 @@ work_dir: ${hydra:runtime.cwd}
 #output
 output_dir: ${hydra:runtime.output_dir}
 
-dataset_dir: /data/dclde_no_balance
+# Staged 3s clips + the DCLDE_3secs.parquet manifest. Override per machine with the
+# env var rather than on the command line: a dropped `paths.dataset_dir=` (one lost
+# backslash in a multi-line paste) silently falls back to this value, and before
+# prepare_data grew its guard that meant a 206k-clip re-download.
+dataset_dir: ${oc.env:TORCA_DATA_DIR,/data/dclde_mim}
 model_dir: ${paths.output_dir}/checkpoints/
 log_dir: ${paths.output_dir}/logs/
 

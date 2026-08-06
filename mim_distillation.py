@@ -39,10 +39,12 @@ from models.components.birdmae_encoder import BirdMAEEncoder
 from models.components.fsq import FSQ
 from models.components.selfdistill_loss import (
     code_counts,
+    codebook_diversity,
     codebook_logits,
     entropy_bits,
     masked_ce,
     sample_student_mask,
+    saturation_frac,
     valid_token_mask,
     vicreg,
 )
@@ -123,6 +125,17 @@ class MIMDistillation(L.LightningModule):
         self.gamma = distill_cfg.get("gamma", 1.0)
         self.val_seed = distill_cfg.get("val_seed", 59)
 
+        # Entropy penalty on code usage. VICReg's variance term measures spread, not
+        # coverage, so it reads healthy (vic_var = 0) while tanh saturation parks every
+        # token on a cube corner and the tokenizer carries ~1 bit. Default 0.0 keeps the
+        # objective unchanged until switched on. Watch train/saturation_frac.
+        self.diversity_weight = distill_cfg.get("diversity_weight", 0.0)
+        self.diversity_sample_weight = distill_cfg.get("diversity_sample_weight", 0.0)
+        # null = score coverage at the CE's own temperature, which measurement says is
+        # right: softening both breaks the ordering (collapsed scores better than
+        # healthy) and shrinks the gradient 10x. See codebook_diversity's docstring.
+        self.diversity_temperature = distill_cfg.get("diversity_temperature", None)
+
         # Epoch-level code-usage histograms. Entropy of pooled counts is not the mean
         # of per-batch entropies, so the headline number has to come from an
         # accumulator rather than from Lightning averaging per-step values.
@@ -197,6 +210,22 @@ class MIMDistillation(L.LightningModule):
 
     # ---------------------------------------------------------------- step
 
+    def _diversity(self, logits, valid):
+        """Coverage penalty, evaluated at its own (softer) temperature.
+
+        `logits` already carry the CE's 1/temperature, so rescaling by
+        temperature/diversity_temperature recovers -d^2/diversity_temperature without
+        recomputing the distances.
+        """
+        scale = 1.0
+        if self.diversity_temperature:
+            scale = self.temperature / self.diversity_temperature
+        return codebook_diversity(
+            logits, valid,
+            softmax_scale=scale,
+            sample_entropy_weight=self.diversity_sample_weight,
+        )
+
     def training_step(self, batch, batch_idx):
         # collate_fn_skip returns None when EVERY clip in the batch failed to load
         # (missing file, unreadable wav). Returning None here is lightning's own
@@ -226,7 +255,8 @@ class MIMDistillation(L.LightningModule):
             cov_weight=self.cov_weight,
             within_clip_var_weight=self.within_clip_var_weight,
         )
-        loss = self.ce_weight * ce + vic
+        div, div_parts = self._diversity(logits, valid)
+        loss = self.ce_weight * ce + vic + self.diversity_weight * div
 
         with torch.no_grad():
             # Codebook usage is THE health metric: FSQNet's earlier failure was a
@@ -260,6 +290,12 @@ class MIMDistillation(L.LightningModule):
                 "train/codes_used_batch": float(used),
                 "train/codebook_frac_batch": used / self.fsq.codebook_size,
                 "train/token_bits_batch": entropy_bits(counts),
+                # Logged whatever diversity_weight is: saturation_frac near 1.0 with
+                # vic_var at 0.0 is the signature of the collapse the VICReg terms
+                # cannot see, and it costs nothing to watch for it.
+                "train/saturation_frac": saturation_frac(z, self.fsq, valid),
+                "train/diversity": div_parts["diversity"],
+                "train/soft_bits": div_parts["soft_bits"],
             },
             on_step=True, on_epoch=False, batch_size=student_wave.shape[0],
         )

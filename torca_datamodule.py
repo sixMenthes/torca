@@ -85,10 +85,39 @@ class LabelDataModule(L.LightningDataModule):
         if cached.exists():
             ok = pl.read_parquet(cached).get_column("Soundfile")
             self.df = self.df.filter(pl.col("Soundfile").is_in(set(ok)))
-        else:
-            self.download_set(self.df)
-            self.df = self.df.filter(~pl.col("Soundfile").is_in(set(self.failed_files)))
-            self.df.write_parquet(cached)
+            return
+
+        # No manifest. That used to mean "download everything", which was right when
+        # staging happened inline. Prestaging is now a separate deliberate step
+        # (prestage_clips.py, and on the cluster a login-node job, since compute nodes
+        # have no internet), so a missing manifest almost always means a wrong
+        # dataset_dir or a renamed manifest — and kicking off a 206k-clip GCS download
+        # is a slow and expensive way to discover that. Fail loudly; opt back in with
+        # data.dataset.allow_download=true.
+        data_dir = Path(self.data_dir)
+        has_clips = data_dir.exists() and next(data_dir.rglob("*.wav"), None) is not None
+
+        if not self.dataset_configs.get("allow_download", False):
+            if has_clips:
+                hint = (f"clips ARE present under {data_dir}, so the manifest is just "
+                        f"missing or renamed. Rebuild it without downloading:\n"
+                        f"  python prestage_clips.py --dataset-dir {data_dir} "
+                        f"--clip-duration {self.clip_duration} "
+                        f"--manifest-name {manifest} --manifest-only")
+            else:
+                hint = (f"no .wav files under {data_dir} either — check "
+                        f"paths.dataset_dir, then stage with:\n"
+                        f"  python prestage_clips.py --dataset-dir <dir> "
+                        f"--clip-duration {self.clip_duration} "
+                        f"--manifest-name {manifest}")
+            raise FileNotFoundError(
+                f"manifest not found: {cached}\n{hint}\n"
+                f"(set data.dataset.allow_download=true to download inline instead)"
+            )
+
+        self.download_set(self.df)
+        self.df = self.df.filter(~pl.col("Soundfile").is_in(set(self.failed_files)))
+        self.df.write_parquet(cached)
 
     def setup(self, stage: str):
 

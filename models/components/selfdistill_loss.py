@@ -18,6 +18,8 @@ flattens NCHW row-major over (time, freq), and BEATs' reshape does the same), so
 of this is backbone-agnostic given the grid width.
 """
 
+import math
+
 import torch
 import torch.nn.functional as F
 
@@ -81,12 +83,117 @@ def codebook_logits(z, fsq, temperature=1.0):
     differentiable analogue that lives in the same space as the codebook is
     bound(z)/half_width — with the rounding, and only the rounding, dropped.
     """
-    half_width = (fsq._levels // 2).to(z.dtype)
-    z_norm = fsq.bound(z) / half_width                        # (..., L)
-    codebook = fsq.codebook.to(z.dtype)                       # (codebook_size, L)
+    z_norm = normalised_z(z, fsq)                             # (..., L)
+    # cast to z_norm's dtype, NOT z's: fsq.bound() promotes to float32 (levels is an
+    # integer buffer, so half_l is float32), so under bf16 the two cdist arguments
+    # disagree and it raises. Autocast reconciles that during training, which is why
+    # it only surfaces when this is called outside autocast — extracting features
+    # from a checkpoint, say.
+    codebook = fsq.codebook.to(z_norm.dtype)                  # (codebook_size, L)
 
     d2 = torch.cdist(z_norm.flatten(0, -2), codebook).pow(2)  # (M, codebook_size)
     return (-d2 / temperature).view(*z_norm.shape[:-1], -1)
+
+
+def normalised_z(z, fsq):
+    """Pre-bound projections -> the codebook's own space, with only the rounding gone.
+
+    `quantize` is round_ste(bound(z))/half_width; this is that without the round. All
+    FSQ codes live in [-1, 1] here, and bound()'s tanh means |z_norm| approaches but
+    never reaches the outermost code.
+    """
+    half_width = (fsq._levels // 2).to(torch.float32)
+    return fsq.bound(z) / half_width
+
+
+def saturation_frac(z, fsq, valid, thresh=0.99):
+    """Fraction of valid coordinates parked at the edge of the bounded range.
+
+    The diagnostic for the collapse VICReg cannot see. Both VICReg terms are computed
+    on the PRE-bound z, but the route from z to a code runs through tanh: drive ||z||
+    up and every large coordinate saturates onto the same extreme. In that regime z
+    has enormous per-dimension std (variance hinge satisfied, vic_var = 0) and
+    independent dimensions (vic_cov ~ 0), while every token quantises to a cube
+    CORNER — 2**L codes out of prod(levels).
+
+    Both guards read healthy while the tokenizer is dead, so this is the number that
+    tells them apart. Near 1.0 means saturated.
+    """
+    with torch.no_grad():
+        sel = normalised_z(z, fsq)[valid]
+        if sel.numel() == 0:
+            return torch.zeros((), device=z.device)
+        return (sel.abs() >= thresh).to(torch.float32).mean()
+
+
+def codebook_diversity(logits, valid, softmax_scale=1.0, sample_entropy_weight=0.0,
+                       eps=1e-8):
+    """Entropy penalty on the soft code assignment: (w*E[H(q)] - H(E[q])) / log K.
+
+    The term the objective is missing. VICReg variance measures SPREAD, and spread
+    does not imply coverage — a distribution in two tight clumps at +/-1.2 has std 1.2
+    and occupies two cells of the grid. Coverage is an entropy question and needs an
+    entropy penalty.
+
+    Form follows LFQ/MAGVIT-v2 (Yu et al. 2024), whose lookup-free quantizer is the
+    same family as FSQ — fixed grid, no learned codebook. Two halves, each doing a
+    distinct job:
+      * -H(E[q])  : entropy of the BATCH-MEAN assignment, maximised. This is the
+        anti-collapse half. Taken of the mean rather than as a mean of per-token
+        entropies, because the latter is minimised by every token being confident,
+        which says nothing about whether they are confident about the SAME code.
+      * +E[H(q)]  : mean per-token entropy, minimised, so tokens still commit to one
+        code rather than smearing across many to cheat the first term.
+    wav2vec 2.0 (Baevski et al. 2020) is the ancestor, using only the first half,
+    expressed as codebook perplexity.
+
+    Unlike FSQNet's old diversity term — negative entropy of a bincount over integer
+    codes, which has no gradient and therefore regularised nothing — this is computed
+    on q = softmax(logits) and does.
+
+    `softmax_scale` rescales the logits before the softmax, so coverage can be scored
+    at a different temperature from the CE. MEASURED: leave it at 1.0, i.e. score at
+    the CE's own sharp temperature. Softening looks like it should help (a near-one-hot
+    q seems to have no gradient) and does the opposite on both counts — separation
+    between healthy and collapsed regimes across 4 synthetic cases, and gradient
+    magnitude:
+
+        t_div   healthy   x16     x4      x1     |grad|
+        0.05     -0.985  -0.766  -0.595  -0.381  1.4e-04   monotonic
+        1.00     -0.993  -0.982  -0.984  -0.925  1.2e-05   NOT monotonic
+
+    At the sharp temperature q_bar is close to the true code histogram, which is
+    exactly the quantity we want; softening smears it toward uniform for every input
+    and the signal disappears into the temperature.
+
+    `sample_entropy_weight` likewise defaults OFF, departing from LFQ. At a sharp
+    temperature the per-token entropy is already near zero, so the term adds nothing
+    and dilutes the coverage signal — at w=1.0 the ordering inverts and a collapsed
+    batch scores BETTER than a healthy one, because a collapsed z sits far from most
+    codes and so has a sharper per-token softmax. Kept as a knob for softer regimes.
+
+    Normalised by log K so the value is comparable across different `levels`, for the
+    same reason token_bits_frac is.
+    """
+    sel = logits[valid] if valid is not None else logits.flatten(0, -2)
+    if sel.numel() == 0:
+        zero = logits.sum() * 0.0
+        return zero, {"diversity": zero.detach(), "soft_bits": zero.detach()}
+
+    q = (sel.float() * softmax_scale).softmax(-1)             # (M, K)
+    log_k = math.log(sel.shape[-1])
+
+    batch_ent = -(q.mean(0) * torch.log(q.mean(0) + eps)).sum()        # H(E[q])
+    sample_ent = -(q * torch.log(q + eps)).sum(-1).mean()              # E[H(q)]
+
+    loss = (sample_entropy_weight * sample_ent - batch_ent) / log_k
+    return loss, {
+        "diversity": loss.detach(),
+        # bits the code distribution actually carries at this temperature; compare
+        # against log2(K). The hard-assignment counterpart is train/token_bits.
+        "soft_bits": (batch_ent / math.log(2)).detach(),
+        "soft_sample_bits": (sample_ent / math.log(2)).detach(),
+    }
 
 
 def masked_ce(logits, target_indices, loss_mask):
