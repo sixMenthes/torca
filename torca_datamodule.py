@@ -70,11 +70,8 @@ class LabelDataModule(L.LightningDataModule):
 
     def prepare_data(self):
         # On a pre-staged (offline) node the clips and a curated manifest already
-        # exist, so skip the GCS download entirely. Filter self.df by the cached
-        # manifest's surviving Soundfiles instead of reloading it wholesale: the
-        # cached LocalPaths were written on the prestage node and won't match
-        # this node's dataset_dir, whereas self.df was just built (load_df) with
-        # the correct paths for this run.
+        # exist, so skip the GCS download entirely and keep only the rows whose clip
+        # actually landed.
         # Name comes from the dataset config so that caches for different
         # clip_durations cannot collide: the clips themselves are named
         # {start_ms}-{end_ms}.wav, so a 5 s stage and a 3 s stage share no files, and
@@ -83,8 +80,44 @@ class LabelDataModule(L.LightningDataModule):
         manifest = self.dataset_configs.get("manifest_name", "DCLDE_no_balance")
         cached = Path(self.data_dir) / manifest
         if cached.exists():
-            ok = pl.read_parquet(cached).get_column("Soundfile")
-            self.df = self.df.filter(pl.col("Soundfile").is_in(set(ok)))
+            # Match per CLIP. This used to filter on Soundfile, which is shared by ~16
+            # annotations, so it really asked "did ANY window from this source file
+            # land". A partially-fetched file therefore kept every one of its rows,
+            # including windows that were never written; those reached __getitem__,
+            # failed os.path.exists, logged "Failed loading file" and were dropped by
+            # collate_fn_skip — shrinking batches by a silently varying amount, every
+            # epoch. The manifest has always carried per-clip rows; only the read side
+            # was coarse.
+            #
+            # Keyed on the tail of LocalPath rather than the whole thing because the
+            # cached manifest was written on the PRESTAGE node and its absolute paths
+            # carry that node's dataset_dir (on the cluster the tarball is extracted
+            # somewhere else entirely). The tail is dataset_dir-independent, and taking
+            # it — rather than re-deriving the path here — leaves build_clip_manifest
+            # the single source of truth for how clips are named.
+            cached_df = pl.read_parquet(cached)
+            if "LocalPath" not in cached_df.columns:
+                raise RuntimeError(
+                    f"the cached manifest {cached} has no LocalPath column, so it "
+                    f"predates per-clip matching (the old inline prepare_data wrote "
+                    f"self.df and only Soundfile was ever read back). Renaming such a "
+                    f"file to the current manifest_name does NOT convert it — it lists "
+                    f"source files, not clips. Rebuild it from what is on disk:\n"
+                    f"  python prestage_clips.py --dataset-dir {self.data_dir} "
+                    f"--clip-duration {self.clip_duration} "
+                    f"--manifest-name {manifest} --manifest-only"
+                )
+            ok = set(clip_key(cached_df.get_column("LocalPath")))
+            self.df = self.df.filter(clip_key(pl.col("LocalPath")).is_in(ok))
+            if self.df.height == 0:
+                raise RuntimeError(
+                    f"the cached manifest {cached} shares no clips with this run's "
+                    f"manifest. Almost always clip_duration: the window is baked into "
+                    f"every filename as {{start_ms}}-{{end_ms}}.wav, so a stage at "
+                    f"another duration matches nothing at all (this run: "
+                    f"clip_duration={self.clip_duration}). Restage at this duration, "
+                    f"or point manifest_name at the right cache."
+                )
             return
 
         # No manifest. That used to mean "download everything", which was right when
@@ -296,6 +329,18 @@ class LabelDataModule(L.LightningDataModule):
         return build_clip_manifest(
             pl.read_parquet(self.parquet_path), self.clip_duration, self.data_dir
         )
+
+
+def clip_key(col):
+    """Identity of a clip, independent of which machine staged it.
+
+    LocalPath is `{data_dir}/{Provider}/{Dataset}/{stem}/{start_ms}-{end_ms}.wav`.
+    Everything after data_dir is reproducible from the annotation row alone, so the
+    last four components identify a clip across a prestage node and a training node
+    that mount the tree at different paths. Works on both a Series and an Expr, so
+    the two sides of the manifest join are written the same way.
+    """
+    return col.str.extract(r"([^/]+/[^/]+/[^/]+/[^/]+\.wav)$", 1)
 
 
 def build_clip_manifest(df, clip_duration, data_dir):

@@ -125,11 +125,12 @@ def make_tarball(dataset_dir, tarball):
 def write_manifest(manifest, args):
     """Report what landed on disk and write the cache manifest.
 
-    prepare_data filters self.df by the Soundfile values in here, so source files that
-    failed entirely drop out of the run. The filter is per SOURCE FILE, not per clip
-    (Soundfile is shared by ~16 annotations on average), so a partially-fetched file
-    keeps all its rows; the stragglers return None at load time and collate_fn_skip
-    drops them.
+    One row per clip that EXISTS. prepare_data filters the run's rows against these
+    by clip_key(LocalPath) — the dataset_dir-independent tail of the path — so a
+    window that never landed is dropped before training rather than surfacing as a
+    "Failed loading file" warning and a short batch. The absolute paths written here
+    are this machine's; only the tail is used on the other side, which is what lets
+    the manifest travel inside the tarball to a node that extracts it elsewhere.
     """
     print("scanning dataset dir (one tree walk, not 206k stats) ...")
     found = existing_clips(args.dataset_dir)

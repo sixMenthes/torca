@@ -50,8 +50,11 @@ echo "clip_duration = $CLIP_DURATION   (must equal data.dataset.clip_duration)"
 # every job start re-stat the tree through the Lustre metadata server; the tarball
 # turns that into one sequential read onto node-local NVMe. The manifest is written
 # BEFORE the tar, so it travels inside the archive and prepare_data finds it after
-# extraction — its LocalPaths are ignored (only Soundfile is read), which is exactly
-# why a staging-node path causes no problem on the compute node.
+# extraction. Its absolute LocalPaths point at THIS node's $STAGE and are meaningless
+# on the compute node, which is fine: prepare_data matches on clip_key(), the tail
+# of the path (Provider/Dataset/stem/window.wav), which is the same wherever the
+# tree is extracted. It matches per CLIP — a manifest listing only source files
+# (anything written by the pre-2026-08 inline prepare_data) will NOT do.
 #
 # --remove-loose refuses if the tar entry count is short, so a truncated archive
 # cannot silently become your only copy.
