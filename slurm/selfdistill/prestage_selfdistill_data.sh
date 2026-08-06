@@ -42,10 +42,12 @@ set -euo pipefail
 MODE="${1:-full}"
 
 # ============================== USER SETTINGS ==============================
-PROJECT_ROOT="${PROJECT_ROOT:-$HOME/links/projects/def-XXXX/$USER/torca_root/torca}"
-VENV="${VENV:-$HOME/torca_venv}"                 # needs gcsfs, soundfile, polars
+PROJECT_ROOT="${PROJECT_ROOT:-$HOME/projects/def-XXXX/$USER/torca}"
+VENV="${VENV:-$HOME/.torca_venv}"                # needs gcsfs, soundfile, polars
 STAGE="${STAGE:-$SCRATCH/selfdistill_stage}"     # loose files on scratch (1M inodes)
-TARBALL="${TARBALL:-$HOME/links/projects/def-XXXX/$USER/torca_root/data/dclde_clips_3s.tar}"
+# Project space, not scratch: scratch is purged on an access-time policy and this is
+# the artefact every job start depends on.
+TARBALL="${TARBALL:-$HOME/projects/def-XXXX/$USER/dclde_clips_3s.tar}"
 CLIP_DURATION="${CLIP_DURATION:-3.0}"            # MUST match data.dataset.clip_duration
 # MUST match data.dataset.manifest_name in BOTH dclde_selfdistill_*.yaml. Named per
 # clip_duration so a 5s cache cannot masquerade as a 3s one.

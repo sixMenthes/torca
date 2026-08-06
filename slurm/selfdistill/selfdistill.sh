@@ -62,10 +62,18 @@ set -euo pipefail
 ARM="${1:-birdmae}"
 
 # ============================== USER SETTINGS ==============================
-PROJECT_ROOT="${PROJECT_ROOT:-$HOME/links/projects/def-XXXX/$USER/torca_root/torca}"
-OUTPUT_DIR="${OUTPUT_DIR:-$HOME/links/projects/def-XXXX/$USER/torca_root/runs}"
-VENV="${VENV:-$HOME/torca_venv}"
-DATA_ROOT="${DATA_ROOT:-$HOME/links/projects/def-XXXX/$USER/torca_root/data}"
+PROJECT_ROOT="${PROJECT_ROOT:-$HOME/projects/def-XXXX/$USER/torca}"
+VENV="${VENV:-$HOME/.torca_venv}"
+# Everything that is not the repo lives directly under the allocation dir: the
+# tarball, both backbones, and (via OUTPUT_DIR below) runs/ logs/ mlruns/.
+DATA_ROOT="${DATA_ROOT:-$HOME/projects/def-XXXX/$USER}"
+# paths/cluster.yaml reads this as `scratch_dir` and hangs runs/, logs/ and mlruns/
+# off it — so this is the DIRECTORY THEY GO IN, not one of them. Naming it
+# ".../runs" would give runs/runs/<task_name>/... The name `scratch_dir` is a
+# misnomer inherited from the finetune configs; project space is deliberate here,
+# because these checkpoints have to survive long enough to be rsynced back for the
+# probes, and scratch is purged.
+OUTPUT_DIR="${OUTPUT_DIR:-$DATA_ROOT}"
 TARBALL="${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}"
 BIRDMAE_CKPT="${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}"
 BEATS_CKPT="${BEATS_CKPT:-$DATA_ROOT/BEATs_iter3.pt}"

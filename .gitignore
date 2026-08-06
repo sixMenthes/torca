@@ -1,5 +1,9 @@
 runs/
 logs/
+# MLflow file store. paths.mlflow_dir defaults to <repo>/mlruns, so the store lands
+# inside the working tree; these are run artefacts, not source. Set TORCA_MLFLOW_DIR
+# to move it out of the repo entirely.
+mlruns/
 .venv/
 /data/
 inspect_weights.py
