@@ -172,6 +172,26 @@ class SelfDistillDataModule(LabelDataModule):
             collate_fn=collate_fn_skip,
         )
 
+    def test_dataloader(self):
+        """There is deliberately no test stage on this path.
+
+        MIMDistillation has no test_step, and should not: the SSL objective is not the
+        study's metric, and computing it over the test hydrophones would touch a split
+        the protocol keeps sealed until the end. Test evaluation is
+        probe.probe_split_protocol — fit on train hydrophones, choose C by GroupKFold
+        within train, touch test exactly once.
+
+        Overridden because the inherited version reads self.test_set, which setup()
+        never builds here (it handles stage "fit" only), so calling it would raise an
+        AttributeError that says nothing about why. Same reason val_dataloader is
+        overridden above.
+        """
+        raise NotImplementedError(
+            "no test stage for self-distillation — evaluate with probe_selfdistill.py "
+            "(source=adapted ckpt_path=...), which fits the probe on train hydrophones "
+            "and touches the sealed test split exactly once"
+        )
+
     def probe_dataloader(self, batch_size=32):
         """LABELLED val clips for the online ecotype probe.
 

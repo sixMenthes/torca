@@ -70,8 +70,27 @@ distill:
   # and independent axes (vic_cov ~ 0) while every token lands on a cube CORNER.
   # Measured: 4 codes of 240, 0.43 bits of a 7.91-bit ceiling, both guards reading
   # healthy throughout. This term penalises that directly.
-  # Start 0.1-1.0; read train/token_bits against log2(K), not codebook_frac.
-  diversity_weight: 0.0
+  # Swept at K=1000, 2000 steps, flat lr (0.0 / 0.1 / 0.3 / 1.0). 1.0 won on BOTH
+  # axes at once — highest token entropy AND lowest CE, i.e. more information per
+  # token and better predictability rather than one bought with the other:
+  #
+  #     W     token_bits  frac   codes  ce     masked_acc
+  #     0.0   2.22        0.343      9  0.699  0.821   <- collapsed
+  #     0.1   8.08        0.823    505  3.744  0.380
+  #     0.3   7.07        0.677    365  3.603  0.463
+  #     1.0   8.73        0.858    673  2.776  0.378
+  #
+  # Ceiling log2(1000)=9.97, chance ln(1000)=6.908, floor 0.442.
+  # Caveats: n=1 per cell and the ordering is not monotonic (0.1 beats 0.3 on every
+  # metric), so run-to-run variance is comparable to the gaps between neighbouring
+  # weights — "1.0 is best" is provisional. Nothing had converged either; token_bits
+  # was still climbing steeply at step 2000 everywhere. What IS robust is the gap
+  # from 0.0: with the penalty off the tokenizer collapses to ~9 codes and
+  # masked_acc 0.82, which is not a usable objective.
+  # At K=240 weight 1.0 pinned token_bits_frac at 0.943 with every code in every
+  # batch; at K=1000 it sits at 0.858 with 673 of 1000, so the larger codebook
+  # bought real headroom rather than forced uniformity.
+  diversity_weight: 1.0
   # Weight on the E[H(q)] half of the LFQ form. OFF, unlike LFQ: at this sharp a
   # temperature per-token entropy is already ~0, so it adds nothing and dilutes the
   # coverage signal. Measured at 1.0 it INVERTS the ordering — a collapsed batch

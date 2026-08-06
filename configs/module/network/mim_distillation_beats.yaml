@@ -35,6 +35,10 @@ distill:
   # MUST stay identical to mim_distillation.yaml — one recipe on both backbones is what
   # makes adaptation a homogeneous on/off treatment rather than a second confound.
   # See that file for why the entropy penalty exists.
-  diversity_weight: 0.0
+  # Swept on the Bird-MAE arm only; see mim_distillation.yaml for the numbers. Kept
+  # identical here by necessity, not by assumption — one recipe on both backbones is
+  # what makes adaptation a homogeneous treatment. If BEATs turns out to need a
+  # different weight, that is a finding to report, not a knob to retune per arm.
+  diversity_weight: 1.0
   diversity_sample_weight: 0.0
   diversity_temperature: null

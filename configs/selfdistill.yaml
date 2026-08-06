@@ -64,5 +64,7 @@ seed: 59
 start_time: ${now:%Y-%m-%d_%H%M%S}
 task_name: "selfdistill"
 
+# No `test:` flag: train_selfdistill.py never calls trainer.test(), and there is no
+# test_step to call. Evaluation on the sealed test hydrophones is probe_selfdistill.py
+# (source=adapted ckpt_path=...), deliberately outside lightning.
 train: true
-test: false
