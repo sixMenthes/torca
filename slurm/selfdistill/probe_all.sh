@@ -37,6 +37,17 @@ PY="${PY:-python}"
 cd "$REPO"
 export HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false
 
+# Belt and braces alongside probe_selfdistill.py's file_system sharing strategy.
+# systemd ships RLIMIT_NOFILE as soft 1024 / hard 524288 and an interactive shell
+# inherits the soft one, which the dataloader exhausts partway through a 5.8k-batch
+# pass. Raising it costs nothing and is not a privileged operation — any process may
+# raise its soft limit up to the hard limit.
+HARD=$(ulimit -Hn)
+[ "$HARD" = "unlimited" ] && HARD=1048576
+if [ "$(ulimit -n)" -lt "$HARD" ]; then
+  ulimit -n "$HARD" 2>/dev/null && echo "raised open-file limit to $(ulimit -n)"
+fi
+
 CELLS=("$@")
 [ ${#CELLS[@]} -eq 0 ] && CELLS=(C0 C1 C2 C3 C4 C5)
 

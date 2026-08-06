@@ -28,7 +28,24 @@ import sys
 from pathlib import Path
 
 import hydra
+import torch
 from omegaconf import DictConfig
+
+# Pass worker->main tensors through /dev/shm files instead of file descriptors.
+#
+# The default 'file_descriptor' strategy costs one open fd per tensor handed across
+# the process boundary, and the probe iterates ~5.8k batches over 187k clips in a
+# single pass — against a soft RLIMIT_NOFILE of 1024 (systemd's default, which an
+# interactive shell usually inherits) that exhausts partway through and surfaces as
+# "Too many open files. Communication with the workers is no longer possible".
+# It hit both the MFCC and the frozen-backbone cells, i.e. it is the loader, not the
+# feature extractor.
+#
+# Must run before any DataLoader worker starts, hence module scope. The tradeoff is
+# that a hard kill (SIGKILL, OOM) can leave files behind in /dev/shm, where the fd
+# strategy would have had the kernel reap them — acceptable for a batch job that
+# reads a fixed dataset once, and the alternative is a run that dies two hours in.
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 import probe as probe_lib
 from emissions import track_emissions
