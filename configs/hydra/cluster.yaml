@@ -1,6 +1,11 @@
-defaults: 
-  - override hydra_logging: colorlog
-  - override job_logging: colorlog 
+# No colorlog here, unlike hydra/workstation.yaml. Batch output is redirected to
+# logs/slurm/%x_%j.out, where ANSI colour codes are not colour — they are literal
+# ESC[32m noise in the middle of every line. It also made hydra-colorlog a hard
+# dependency of every cluster job: the plugin is resolved during config composition,
+# so if it is missing the job dies seconds after it finally reaches the front of the
+# queue, and you pay the whole wait again to find out.
+#
+# Nothing else changes: hydra's default logging writes the same records.
 
 job:
   chdir: True
