@@ -89,6 +89,14 @@ def run(cfg: DictConfig):
         loader_configs=cfg.data.loaders,
         transform_configs=cfg.data.transform,
     )
+    # NOT optional, and it is not about downloading. prepare_data is what filters
+    # self.df down to clips that exist on disk. Without it, rows whose clip never
+    # landed stay in df — and then `tags` below is built from df while X is built
+    # from the loader, which SKIPS those rows (_collate drops them, extract_backbone
+    # drops empty batches). X ends up shorter than tags and every split assignment
+    # is silently shifted. With ~7.3k absent clips in the current stage that is not
+    # hypothetical.
+    dm.prepare_data()
 
     df = labelled_pool(dm.df, cfg.data.dataset.labels)
     log.info(f"{df.height} labelled clips")
@@ -125,6 +133,20 @@ def run(cfg: DictConfig):
                     extract_backbone(encoder, loader, layer=l, device=cfg.device)
                 for l in layers
             }
+
+    # Belt and braces on the alignment above. prepare_data should have made every row
+    # in df loadable, but a clip that exists and fails to DECODE is also dropped by
+    # _collate, and that one no manifest can predict. A length mismatch here means the
+    # split tags no longer correspond row-for-row to the features, which does not raise
+    # on its own — it just quietly reports numbers for the wrong split.
+    for name, (X, _) in cells.items():
+        if X.shape[0] != len(tags):
+            raise RuntimeError(
+                f"feature/tag misalignment in cell '{name}': {X.shape[0]} feature rows "
+                f"vs {len(tags)} split tags. {len(tags) - X.shape[0]} clips were "
+                f"dropped during extraction (missing or undecodable). Re-run "
+                f"prestage_clips.py --manifest-only so the manifest matches the tree."
+            )
 
     # Background index drives the nuisance probe's channel-only restriction.
     bg_index = dm.label_map.get("Background", -1)

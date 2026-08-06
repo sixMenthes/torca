@@ -7,4 +7,9 @@ output_dir: ${hydra:runtime.output_dir}    # = the per-run hydra dir (alias)
 
 dataset_dir: /data/dclde_no_balance
 model_dir: ${paths.output_dir}/checkpoints/   # per-run checkpoints, no collisions
-log_dir: ${paths.scratch_dir}/logs/           # shared MLflow store across runs
+log_dir: ${paths.scratch_dir}/logs/
+
+# Shared across runs, on scratch — NOT $SLURM_TMPDIR, which is wiped when the job
+# ends and would take the run history with it. Only the three SSL training runs land
+# here; the six probes all run on the workstation against its own store.
+mlflow_dir: ${paths.scratch_dir}/mlruns

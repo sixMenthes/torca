@@ -1,7 +1,11 @@
 _target_: pytorch_lightning.loggers.mlflow.MLFlowLogger
 experiment_name: "Finetune with no pre-training"
 run_name: ${task_name}_${data.dataset.name}_${start_time}
-tracking_uri: ${paths.log_dir}/mlflow/mlruns # run `mlflow ui` command inside the `logs/mlflow/` dir to open the UI
+# One store per MACHINE. This used to be ${paths.log_dir}/mlflow/mlruns, and on the
+# workstation log_dir derives from output_dir = the per-run hydra directory — so every
+# run wrote a private store holding exactly one run, and no two runs were ever
+# comparable in the UI. Open it with:  mlflow ui --backend-store-uri <paths.mlflow_dir>
+tracking_uri: ${paths.mlflow_dir}
 tags: null
 # save_dir: "./mlruns"
 prefix: ""

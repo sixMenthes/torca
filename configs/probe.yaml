@@ -51,12 +51,37 @@ device: cuda
 
 seed: 59
 
-# One MLflow experiment per ablation cell, same convention as selfdistill.yaml. The
-# encoder name is in there so the two frozen controls (C1 BEATs, C2 Bird-MAE) do not
-# share an experiment; override task_name directly for anything finer.
+# Which ablation cell this run IS. Every probe cell logs the SAME metric keys
+# (final/task_ecotype, final/nuisance_bg, ...), so putting all six in one experiment
+# makes the comparison a single sorted table rather than six tabs — which is the whole
+# point of the study, since the claim is about the difference between cells.
+#
+#   C0  mfcc                                   non-neural floor
+#   C1  frozen  BEATs                          unadapted control
+#   C2  frozen  BirdMAE                        unadapted control
+#   C3  adapted BEATs                          selfdistill_beats checkpoint
+#   C4  adapted BirdMAE                        selfdistill_birdmae checkpoint
+#   C5  adapted BirdMAE, background.p=0.0      attribution control
+#
+# Required for adapted cells and not merely cosmetic: C4 and C5 differ ONLY in the
+# checkpoint, so without it their run names and task_names are identical and the two
+# are indistinguishable in the table.
+# A string rather than null because it becomes an MLflow tag value, and a one-off
+# `python probe_selfdistill.py source=frozen` should not fail on a None tag.
+cell: unlabelled
+
+# task_name still names the emissions project and the hydra run dir, so it stays
+# per-cell. It is the RUN name in MLflow, not the experiment.
 task_name: "probe_${source}_${module.network.encoder.name}"
 logger:
-  experiment_name: ${task_name}
-  run_name: ${task_name}_${start_time}
+  experiment_name: selfdistill_probes
+  run_name: ${cell}_${task_name}_${start_time}
+  # Tags are what the UI filters and groups on, so the columns that distinguish cells
+  # should not have to be parsed back out of a run name.
+  tags:
+    cell: ${cell}
+    source: ${source}
+    backbone: ${module.network.encoder.name}
+    stage: probe
 
 start_time: ${now:%Y-%m-%d_%H%M%S}

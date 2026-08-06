@@ -170,5 +170,11 @@ def encoder_from_checkpoint(ckpt_path, map_location="cpu"):
 
 
 def labelled_pool(df, labels):
-    """Rows usable for probing: a known ecotype label and a materialised clip."""
+    """Rows usable for probing: a known ecotype label.
+
+    Materialisation is NOT checked here — it is the caller's job to pass a df that
+    prepare_data has already filtered to clips on disk. Doing it in two places would
+    mean two definitions of "present", and the manifest is the one that also travels
+    to the cluster inside the tarball.
+    """
     return df.filter(pl.col("Labels").is_in(list(labels)))

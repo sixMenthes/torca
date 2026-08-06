@@ -12,5 +12,14 @@ dataset_dir: ${oc.env:TORCA_DATA_DIR,/data/dclde_mim}
 model_dir: ${paths.output_dir}/checkpoints/
 log_dir: ${paths.output_dir}/logs/
 
+# ONE MLflow store for the whole machine. This USED to be derived from log_dir,
+# i.e. from output_dir, i.e. from the per-run hydra directory — so every run wrote
+# a private store containing exactly one run and nothing could ever be compared in
+# the UI. paths/cluster.yaml already got this right ("shared MLflow store across
+# runs"); the two files had simply diverged.
+# Env var so a second checkout or a merged store can be pointed at without an
+# override that a dropped backslash can silently eat.
+mlflow_dir: ${oc.env:TORCA_MLFLOW_DIR,${paths.root_dir}/mlruns}
+
 
 
