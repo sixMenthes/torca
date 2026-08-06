@@ -70,6 +70,20 @@ TARBALL="${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}"
 BIRDMAE_CKPT="${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}"
 BEATS_CKPT="${BEATS_CKPT:-$DATA_ROOT/BEATs_iter3.pt}"
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
+
+# Checkpoint cadence. model_checkpoint monitors val/loss, so a checkpoint can only
+# be written on an epoch that VALIDATES — with the trainer config's
+# check_val_every_n_epoch=5 the first one lands after five full epochs (~6.2k steps
+# each). Validate every epoch for the first production run: the val set is
+# CarmanahPt alone, so a pass is cheap, and a run that dies at hour six having
+# saved nothing is not.
+MAX_EPOCHS="${MAX_EPOCHS:-5}"
+VAL_EVERY="${VAL_EVERY:-1}"
+# Two batches through the val loader BEFORE training starts. The trainer config
+# disables this, which was fine while every run had limit_val_batches=0 — but that
+# means val_ssl_set has never actually been constructed or read. A broken val path
+# should cost seconds at job start, not a full epoch.
+SANITY_STEPS="${SANITY_STEPS:-2}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -153,6 +167,9 @@ srun python train_selfdistill.py \
     trainer=single_gpu \
     trainer.devices=1 \
     trainer.precision=bf16 \
+    trainer.max_epochs="$MAX_EPOCHS" \
+    trainer.check_val_every_n_epoch="$VAL_EVERY" \
+    trainer.num_sanity_val_steps="$SANITY_STEPS" \
     paths.dataset_dir="$DATA_DIR" \
     data.dataset.parquet_path="$PARQUET" \
     data.loaders.train.num_workers="$NWORKERS" \
