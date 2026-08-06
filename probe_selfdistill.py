@@ -244,9 +244,17 @@ def run(cfg: DictConfig):
             if ct != "n/a":
                 metrics[f"{name}/task_calltype"] = float(ct)
             # per-hydrophone breakdown matters here: with two test hydrophones the
-            # headline can be carried by one of them, and that is worth seeing
+            # headline can be carried by one of them, and that is worth seeing.
+            #
+            # Underscore, NOT a second slash. MLflow's file store writes each metric
+            # to metrics/<key>, so a slash is a directory separator: with
+            # "{name}/task_ecotype/{hydro}" it first creates metrics/{name}/task_ecotype
+            # as a FILE for the headline metric, then tries to open that same path as a
+            # directory and dies with NotADirectoryError. Any key that is a strict
+            # prefix of another key breaks the same way. One level of slash is what
+            # groups the cell in the UI; below that, keep it flat.
             for hydro, val in task["per_hydrophone"].items():
-                metrics[f"{name}/task_ecotype/{hydro}"] = val
+                metrics[f"{name}/task_ecotype_{str(hydro).replace('/', '_')}"] = val
             logger.log_metrics(metrics)
 
     if chance:

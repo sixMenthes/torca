@@ -1,0 +1,6 @@
+artifact_location: /home/tundra/claude/torca/mlruns/385382921965441954
+creation_time: 1786013044640
+experiment_id: '385382921965441954'
+last_update_time: 1786013044640
+lifecycle_stage: active
+name: selfdistill_probes
