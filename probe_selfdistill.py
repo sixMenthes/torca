@@ -141,7 +141,12 @@ def run(cfg: DictConfig):
                          output_dir=str(cfg.paths.get("log_dir", ".")),
                          **emissions_cfg) as emissions:
         if cfg.source == "mfcc":
-            cells = {"mfcc": (extract_mfcc(loader, sr, n_mfcc=cfg.n_mfcc))}
+            # "final", NOT "mfcc". This key becomes the metric prefix, and MLflow can
+            # only overlay or tabulate runs that share a metric name — naming the
+            # floor's cell after itself put C0 on keys no other cell has, so it
+            # silently dropped out of every cross-cell chart and comparison. The name
+            # means "the pooled representation", which is exactly what this is.
+            cells = {"final": (extract_mfcc(loader, sr, n_mfcc=cfg.n_mfcc))}
         else:
             encoder = _build_encoder(cfg)
             layers = list(cfg.layers) if cfg.get("layers") else [None]
@@ -180,7 +185,12 @@ def run(cfg: DictConfig):
             "ckpt_path": str(cfg.get("ckpt_path")),
             "layers": str(list(cfg.layers) if cfg.get("layers") else ["final"]),
             "c_selection": cfg.c_selection,
-            "encoder": cfg.module.network.encoder.name,
+            # The MFCC floor has no encoder. module/network is still composed for it
+            # (probe.yaml needs a default), so reading the name straight off the
+            # config labelled C0 as BirdMAE and made it look like a Bird-MAE variant
+            # in every params column.
+            "encoder": "none (MFCC)" if cfg.source == "mfcc"
+                       else cfg.module.network.encoder.name,
             "clip_duration": cfg.data.dataset.clip_duration,
             "test_hydros": str(list(cfg.data.dataset.test_hydros)),
             "n_labelled_clips": df.height,
