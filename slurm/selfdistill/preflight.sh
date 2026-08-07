@@ -21,6 +21,14 @@
 #
 # Cheap enough for a login node: fast_dev_run is a single train batch and a single
 # val batch, two workers, on CPU. Do not run anything larger here.
+#
+# The online probes needed explicit help with that. fast_dev_run limits the train and
+# val LOOPS, but a callback that builds its own dataloader sits outside that limit, and
+# both of ours do. Unfixed, stage 3 spent nine minutes on the ecotype probe's 435 clips
+# and would have spent ninety more on the code-usage probe's 4,243 — ViT-B forward
+# passes on shared login-node CPUs. Both callbacks now cap themselves at two batches
+# when trainer.fast_dev_run is set, which still exercises the code path (the point of
+# stage 3) while discarding numbers that are meaningless after one optimiser step.
 # ---------------------------------------------------------------------------
 set -uo pipefail
 

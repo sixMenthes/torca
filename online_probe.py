@@ -64,9 +64,18 @@ class OnlineProbe(Callback):
         was_training = encoder.training
         encoder.eval()
 
+        # fast_dev_run limits the train and val LOOPS to one batch, but this callback
+        # builds its own dataloader and would otherwise iterate all of it — 435 clips,
+        # which is nine minutes of ViT-B forward passes on a login node's CPUs. The
+        # preflight's whole purpose is to exercise this code path in under a minute, so
+        # cap it there and let the real run see everything.
+        max_batches = 2 if trainer.fast_dev_run else None
+
         feats, labels = [], []
         try:
-            for batch in dm.probe_dataloader():
+            for i, batch in enumerate(dm.probe_dataloader()):
+                if max_batches is not None and i >= max_batches:
+                    break
                 if batch is None:
                     continue
                 wave = batch["wave"].to(pl_module.device)
@@ -181,7 +190,7 @@ class CodeUsageProbe(Callback):
         self.seed = seed
 
     @torch.no_grad()
-    def _tokenise(self, pl_module, loader):
+    def _tokenise(self, pl_module, loader, max_batches=None):
         """(pooled counts, {site: counts}) over a loader, padding excluded."""
         from models.components.selfdistill_loss import code_counts, valid_token_mask
 
@@ -189,7 +198,9 @@ class CodeUsageProbe(Callback):
         pooled = np.zeros(K, dtype=np.int64)
         by_site, per_clip = {}, []
 
-        for batch in loader:
+        for i, batch in enumerate(loader):
+            if max_batches is not None and i >= max_batches:
+                break
             if batch is None:
                 continue
             wave = batch["wave"].to(pl_module.device)
@@ -231,13 +242,22 @@ class CodeUsageProbe(Callback):
         ceiling = np.log2(K)
         metrics, bg_per_clip = {}, None
 
+        # See OnlineProbe: fast_dev_run does not reach a callback's own dataloader, and
+        # this one iterates 4,243 clips across its two subsets. On the preflight's CPU
+        # path that is roughly ninety minutes on a shared login node. Two batches is
+        # enough to prove the code path — the NUMBERS from a fast_dev_run are meaningless
+        # anyway, since the model has taken one step.
+        max_batches = 2 if trainer.fast_dev_run else None
+
         try:
             for tag, background in (("bg", True), ("call", False)):
                 loader = dm.code_usage_dataloader(
                     background, max_per_hydro=self.max_per_hydro,
                     batch_size=self.batch_size,
                 )
-                pooled, by_site, per_clip = self._tokenise(pl_module, loader)
+                pooled, by_site, per_clip = self._tokenise(
+                    pl_module, loader, max_batches=max_batches
+                )
                 if pooled.sum() == 0:
                     continue
                 bits = _entropy_bits(pooled)
