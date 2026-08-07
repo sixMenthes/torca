@@ -1,10 +1,21 @@
 # DCLDE split for the self-distillation domain-adaptation study.
-# Finalized 2026-08-04. Differs from DCLDE.yaml (the finetune split) only in:
-#   - test_hydros: StrGeoS1 swapped OUT (moved to train), BarkleyCanyon swapped IN
-#     (ONC, unique provider => leak-free, carries all 4 ecotype classes incl TKW).
+# Revised 2026-08-07. Differs from DCLDE.yaml (the finetune split) in:
+#   - the three-hydrophone test split described below;
 #   - clip_duration 5.0 -> 3.0 (tighter on call); pair with transform target_length=304.
 # StrGeo* stay in TRAIN: with StrGeoS1 out of test, StraitofGeorgia (JASCO) vs
 # StrGeo* (DFO_WDA) are different instrument/depth/time = different recording chains.
+#
+# Why this split is by HYDROPHONE and not, as is more usual, by soundfile within a
+# pooled set. The study's claim is about the recording-condition confound: that a
+# representation encodes which hydrophone a clip came from, and that self-distillation
+# with cross-hydrophone noise removes it. Split with every site present on both sides
+# and the probe can read the channel shortcut in train and test alike, so the confound
+# becomes unmeasurable and the experiment answers nothing. The by-hydrophone split is
+# the measuring instrument here, not a stylistic preference. (Palmer's Salish Sea
+# ecotype classifier splits by soundfile with all sites in training, which is correct
+# for her question — she is measuring deployment performance in known conditions, with
+# the separate Malahat deployment as her out-of-distribution tier. Our whole evaluation
+# is that tier.)
 parquet_path: /home/tundra/projects/torca/ds/DCLDE_w_Buzzes.parquet
 dataset_dir: ${paths.dataset_dir}
 name: DCLDE_selfdistill_birdmae
@@ -29,11 +40,83 @@ manifest_name: DCLDE_3secs.parquet
 
 columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath']
 
-test_hydros: ["StraitofGeorgia", "BarkleyCanyon"]
+# THREE recording chains, so the headline is a distribution and not a point. With the
+# previous two-site split the pooled ecotype accuracy for frozen Bird-MAE was 0.289,
+# which was BarkleyCanyon at 0.136 and StraitofGeorgia at 0.589 averaged together —
+# a number carried entirely by which site happened to dominate. Report per site, then
+# pooled, then the adapted-minus-frozen difference computed site by site (pairing
+# cancels site difficulty, which matters far more than a mean does at this n).
+#   StraitofGeorgia  JASCO. Holds ALL 817 call-type-labelled clips on the test side;
+#                    the other two have none, so this site alone keeps that metric.
+#   BarkleyCanyon    ONC, a provider appearing nowhere else, so it is leak-free by
+#                    construction, and it carries all four ecotype classes.
+#   CarmanahPt       previously the sole val hydrophone.
+# CHANGING THIS LIST INVALIDATES EXISTING CHECKPOINTS. build_selfdistill_set holds out
+# test + val, so these are the conditions adaptation never sees; adding a site after
+# training means the "adapted" cell has already seen it and the frozen control has not,
+# which biases exactly the comparison the study exists to make.
+test_hydros: ["StraitofGeorgia", "CarmanahPt", "BarkleyCanyon"]
 
-val_hydros: ["CarmanahPt"]
+# TWO hydrophones, because the selection signal is val/loss — the self-supervised
+# masked-prediction loss on channels the model never adapted on. Measuring it across
+# two channels rather than one is what stops heavy tuning from selecting adaptation
+# settings that merely suit a single recording chain.
+# Cpe_Elz's ecotype labels are known to be incomplete. That does not matter for the
+# role it plays here: val/loss is computed without labels at all. It WOULD matter for
+# the online probe, which is why online_probe_hydro below excludes it.
+#
+# BOTH of these were ALREADY discarded by the nuisance probe, which drops training
+# sites holding fewer than 50 Background clips (Cpe_Elz has 48, StrGeoS1 has 3). So
+# this split costs that metric nothing: it keeps all ten hydrophones and its chance
+# level stays 0.100. Choosing bush_point instead would have cost one, since its 231
+# Background clips are counted there.
+val_hydros: ["Cpe_Elz", "StrGeoS1"]
+
+# The ONE validation hydrophone the online ecotype probe fits and scores on. Separate
+# from val_hydros on purpose — see SelfDistillDataModule.probe_dataloader. Held to a
+# single site so the probe cannot score by identifying the channel.
+# Not Cpe_Elz: at ~89% TKW the other three classes carry too few clips for balanced
+# accuracy to mean anything, and its labels are unverified.
+# Not bush_point: it is SRKW against Background with no HW and no TKW, so a probe there
+# measures whale DETECTION, not the ecotype discrimination this study is about.
+# StrGeoS1 is the site with several ecotype classes actually represented.
+# Watch this number, do not select on it. val/loss is the selection signal.
+online_probe_hydro: StrGeoS1
 
 low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab', 'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
+
+# --- adaptation pool balancing -------------------------------------------------
+# These affect the SELF-DISTILLATION pool only. No probe reads them.
+#
+# Measured on the manifest before capping: WVanIsl supplied 60.0% of the adaptation
+# pool and NorthBc 23.6%, so two sites gave 83.6% of everything the model adapts on,
+# and both are low-sample-rate sites that no probe evaluates. As an inverse Simpson
+# index — how many equally sized hydrophones would give the same chance of two random
+# clips sharing a site — 26 hydrophones amounted to an effective 2.4.
+#
+# The same two sites are 84.2% and 58.2% humpback, which made the pool as a whole
+# roughly 65% humpback in a study about killer whale ecotypes. Capping fixes both at
+# once, because the cap bites hardest exactly where the humpback is: at 10,000 the pool
+# becomes ~51k clips, an effective 8.8 channels, and about 35% SRKW / 31% HW / 21%
+# Background / 6% TKW. That is why there is no separate per-class ceiling here.
+# Allocation is proportional within each site, so each site keeps its own class mix.
+max_clips_per_hydro: 10000
+
+# The bank is the Background clips used as ADDITIVE NOISE in the student view, which is
+# what "cross-hydrophone noise" means and therefore what cell C5 (background.p=0.0) is
+# the control for. Uncapped it was 43.8% NorthBc and 28.8% WVanIsl, an effective 3.5
+# channels out of 15, at which point C4 against C5 tests whether those two sites' noise
+# helps rather than whether cross-hydrophone noise helps. At 1,000 the bank is 7,494
+# clips, no site above 13.3%, an effective 9.3. Going to 500 buys ~1.8 more effective
+# channels for a third of the bank, which is the worse trade.
+max_bank_clips_per_hydro: 1000
+
+# Fixed so the pool is identical across runs, across both backbone arms, and between a
+# run and the report describing it. The ablation compares cells that must differ only
+# in the treatment under test; a pool that reshuffled per run would add a second
+# uncontrolled difference.
+subsample_seed: 59
+# -------------------------------------------------------------------------------
 
 labels: ['Background', 'HW', 'SRKW', 'TKW']
 num_classes: 4

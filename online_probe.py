@@ -4,10 +4,19 @@ The SSL loss says whether the pretext task is being solved; it does not say whet
 ecotype became more decodable, which is the thing the study is actually about. This
 callback answers that during training instead of only at the end.
 
-It probes CarmanahPt alone, and the single-hydrophone restriction is a feature: with
-recording condition held constant the probe cannot exploit a channel shortcut, so the
-number is a clean read on ecotype separability rather than a mix of ecotype and
-recording condition.
+It probes ONE hydrophone alone, named by `online_probe_hydro` in the dataset config,
+and the single-hydrophone restriction is a feature: with recording condition held
+constant the probe cannot exploit a channel shortcut, so the number is a clean read on
+ecotype separability rather than a mix of ecotype and recording condition.
+
+That site is StrGeoS1, which is deliberately NOT simply "the val hydrophone". val_hydros
+now holds two sites, because val/loss is a better selection signal when measured across
+more than one unseen channel, and with two sites in play the probe could score by
+identifying the channel instead of the call. StrGeoS1 rather than the other val site
+because it carries 204 HW, 60 SRKW and 168 TKW, so it poses a genuine three-way ecotype
+discrimination (chance 0.333), whereas Cpe_Elz is ~89% TKW and bush_point is SRKW
+against Background with no HW or TKW at all — a probe there would be measuring whale
+detection, not ecotype.
 
 It is a MONITORING signal, not the reported metric. The reported number comes from
 probe_selfdistill.py, which fits on train hydrophones and evaluates once on the sealed

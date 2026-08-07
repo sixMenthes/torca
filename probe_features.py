@@ -236,20 +236,36 @@ def split_report(df, tags, dataset_cfg, source_df=None):
     prov = (np.asarray(df.get_column("Provider").to_list())
             if "Provider" in df.columns else np.array([""] * df.height))
 
+    # One column PER ECOTYPE CLASS rather than a single Background count. Two clip
+    # counts cannot tell you whether a site is usable as a probe target: bush_point
+    # reads as a healthy 741 clips with 231 Background, and is in fact SRKW against
+    # Background with no HW and no TKW at all, so a probe fitted there measures whale
+    # detection and not ecotype discrimination. That is only visible per class.
     L = []
     w = max([len(h) for h in np.unique(hyd)] + [10])
     p = max([len(x) for x in np.unique(prov)] + [8])
+    cw = max([len(x) for x in labels] + [5])
     L.append("=== hydrophone -> split tag ===")
     L.append(f"  {'hydrophone':<{w}} {'provider':<{p}} {'tag':<8} {'clips':>8} "
-             f"{'background':>11} {'calltype':>9}")
-    L.append("  " + "-" * (w + p + 40))
+             + " ".join(f"{lb:>{cw}}" for lb in labels)
+             + f" {'calltype':>9} {'classes':>8}")
+    L.append("  " + "-" * (w + p + 30 + (cw + 1) * len(labels)))
     order = {"train": 0, "val": 1, "test": 2, "low_sr": 3}
     for t, h in sorted({(str(tags[i]), hyd[i]) for i in range(len(hyd))},
                        key=lambda p_: (order[p_[0]], p_[1])):
         m = hyd == h
         pv = "/".join(sorted(set(prov[m])))
-        L.append(f"  {h:<{w}} {pv:<{p}} {t:<8} {m.sum():>8} {(m & is_bg).sum():>11} "
-                 f"{(m & has_call).sum():>9}")
+        per = [int((m & (lab == lb)).sum()) for lb in labels]
+        # A site with one dominant class is not a usable probe target even when its
+        # total looks generous: balanced accuracy averages per-class recall, so a class
+        # holding a handful of clips contributes mostly noise, and a cross-validation
+        # fold may not contain it at all.
+        n_usable = sum(1 for c in per if c >= 20)
+        L.append(f"  {h:<{w}} {pv:<{p}} {t:<8} {m.sum():>8} "
+                 + " ".join(f"{c:>{cw}}" for c in per)
+                 + f" {(m & has_call).sum():>9} {n_usable:>8}")
+    L.append(f"  (the 'classes' column counts ecotype classes with >=20 clips at that "
+             f"site — the online probe needs several)")
     # Any provider spanning the train/test boundary breaks the "held-out recording
     # chain" claim, which is what the whole test protocol rests on.
     shared = sorted(set(prov[tags == "train"]) & set(prov[tags == "test"]))

@@ -1,7 +1,6 @@
 # DCLDE split for the self-distillation domain-adaptation study.
-# Finalized 2026-08-04. Differs from DCLDE.yaml (the finetune split) only in:
-#   - test_hydros: StrGeoS1 swapped OUT (moved to train), BarkleyCanyon swapped IN
-#     (ONC, unique provider => leak-free, carries all 4 ecotype classes incl TKW).
+# Revised 2026-08-07. Differs from DCLDE.yaml (the finetune split) in:
+#   - the three-hydrophone test split (see below);
 #   - clip_duration 5.0 -> 3.0 (tighter on call); pair with transform target_length=304.
 # StrGeo* stay in TRAIN: with StrGeoS1 out of test, StraitofGeorgia (JASCO) vs
 # StrGeo* (DFO_WDA) are different instrument/depth/time = different recording chains.
@@ -25,11 +24,29 @@ manifest_name: DCLDE_3secs.parquet
 
 columns: ['ID', 'Soundfile', 'Provider', 'Dataset', 'Labels', 'FileBeginSec', 'FileEndSec', 'Duration', 'CalltypeCategory', 'Buzz', 'NewPath']
 
-test_hydros: ["StraitofGeorgia", "BarkleyCanyon"]
+# These three lists MUST stay identical to dclde_selfdistill_birdmae.yaml. The two
+# files exist only to select a different front-end, and the BEATs and Bird-MAE cells
+# are compared directly to each other — if the splits drift apart, that comparison is
+# between two different experiments and nothing says so. The full rationale for each
+# entry (why three test sites, why two val sites, why the online probe is pinned to one)
+# lives in the birdmae file; it is not repeated here so that there is one place to
+# change it. report_splits.py prints the split for whichever config you pass, so run it
+# on both if you ever edit either.
+test_hydros: ["StraitofGeorgia", "CarmanahPt", "BarkleyCanyon"]
 
-val_hydros: ["CarmanahPt"]
+val_hydros: ["Cpe_Elz", "StrGeoS1"]
+
+online_probe_hydro: StrGeoS1
 
 low_sr_hydros: ['NorthBc', 'WVanIsl', 'orcasound_lab', 'MS_671879205', 'Field_HTI', 'KB_67383303', 'RB_335826997', 'KB_67424266', 'HE_67424266', 'RB_67424266', 'HE_67391498', 'MS_6897', 'KB_5354', 'MS_5360', 'Field_SondTrap']
+
+# Adaptation-pool balancing. MUST match dclde_selfdistill_birdmae.yaml, which carries
+# the full rationale and the measured numbers; the BEATs and Bird-MAE cells are compared
+# to each other, so a different pool here would make that a comparison between two
+# experiments.
+max_clips_per_hydro: 10000
+max_bank_clips_per_hydro: 1000
+subsample_seed: 59
 
 labels: ['Background', 'HW', 'SRKW', 'TKW']
 num_classes: 4

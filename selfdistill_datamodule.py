@@ -10,6 +10,53 @@ from selfdistill_dataset import SelfDistillDataset, WaveformViewAug
 log = get_pylogger(__name__)
 
 
+def _cap_per_hydrophone(df, cap, seed, stratify_col=None, what="pool"):
+    """Cap each hydrophone's contribution at `cap` clips, sampling without replacement.
+
+    Sites already at or below the cap are returned untouched, so this can only ever
+    remove clips from the sites that dominate. It follows that a cap cannot manufacture
+    diversity that is not in the data: the achievable ceiling is set by how many sites
+    contribute a meaningful number in the first place.
+
+    With `stratify_col`, allocation is PROPORTIONAL — each group keeps its share of the
+    site's mix and only the total shrinks. A group is never reduced below one clip, so a
+    class present at a site cannot vanish from it entirely through rounding; that makes
+    the totals land within a few clips of the cap rather than exactly on it, which does
+    not matter for anything downstream.
+
+    Sampling is seeded, so the pool is identical across runs, across the two backbone
+    arms, and between a run and the report that describes it. That is not a nicety: the
+    ablation compares cells that must differ only in the treatment under test, and a
+    pool that reshuffled per run would add a second difference nobody controlled.
+    """
+    if not cap:
+        return df
+
+    kept, dropped = [], 0
+    for (site,), sub in df.group_by(["Dataset"], maintain_order=True):
+        if sub.height <= cap:
+            kept.append(sub)
+            continue
+        dropped += sub.height - cap
+        if stratify_col is None:
+            kept.append(sub.sample(n=cap, shuffle=True, seed=seed))
+            continue
+        frac = cap / sub.height
+        parts = []
+        for (_g,), grp in sub.group_by([stratify_col], maintain_order=True):
+            n = min(grp.height, max(1, int(round(grp.height * frac))))
+            parts.append(grp.sample(n=n, shuffle=True, seed=seed))
+        kept.append(pl.concat(parts))
+
+    out = pl.concat(kept)
+    if dropped:
+        log.info(
+            f"{what}: capped at {cap} clips per hydrophone, dropped {dropped} "
+            f"({df.height} -> {out.height})"
+        )
+    return out
+
+
 class SelfDistillDataModule(LabelDataModule):
     """Self-supervised adaptation datamodule (EMA self-distillation).
 
@@ -23,25 +70,74 @@ class SelfDistillDataModule(LabelDataModule):
         with the mel/PCEN front-end deferred to the model.
     """
 
-    def build_selfdistill_set(self):
+    def _ssl_pool_uncapped(self):
         # Everything except held-out test/val; low-SR INCLUDED (the classifier
         # pool excludes it, we don't). No Labels filter — SSL is label-agnostic.
         held_out = self.test_hydros + self.val_hydros
         return self.df.filter(~pl.col("Dataset").is_in(held_out))
 
-    def _ssl_background_bank(self):
-        # Cross-hydrophone (and cross-SR) background bank: Background-labelled
-        # clips from any non-test/val hydrophone, low-SR included. This is the
-        # de-confounding lever — the student view sees the channel variety we
-        # want the backbone to become invariant to.
-        held_out = self.test_hydros + self.val_hydros
-        return (
-            self.df.filter(
-                pl.col("Labels") == "Background", ~pl.col("Dataset").is_in(held_out)
-            )
-            .get_column("LocalPath")
-            .to_list()
+    def build_selfdistill_set(self):
+        """The adaptation pool, capped so that no one hydrophone dominates it.
+
+        Uncapped, this pool was 60% WVanIsl and 23.6% NorthBc: two sites supplying
+        83.6% of everything the model adapts on, and both of them low-sample-rate sites
+        that no probe ever evaluates. Measured as an inverse Simpson index — the number
+        of equally sized hydrophones that would give the same probability of two random
+        clips sharing a site — 26 hydrophones amounted to an effective 2.4. A cap of
+        10,000 raises that to 8.8 and leaves ~51k clips.
+
+        Two problems are fixed by the one rule. The first is channel concentration,
+        which matters because a representation adapted overwhelmingly on one recording
+        chain narrows onto it, and the chains we evaluate on are not that one. The
+        second is content: WVanIsl is 84.2% humpback and NorthBc 58.2%, so the pool as a
+        whole was roughly 65% humpback in a study about killer whale ecotypes. Because
+        the cap bites hardest exactly on the two humpback-heavy sites, it takes that to
+        about 31% without needing a separate per-class ceiling.
+
+        Allocation is PROPORTIONAL within each site: every class keeps its share of that
+        site's mix and only the total shrinks. The alternative, equal allocation, would
+        flatten each site's class balance, which would be a much more invasive change to
+        the data than the concentration problem calls for.
+        """
+        return _cap_per_hydrophone(
+            self._ssl_pool_uncapped(),
+            self.dataset_configs.get("max_clips_per_hydro", None),
+            seed=int(self.dataset_configs.get("subsample_seed", 59)),
+            stratify_col="Labels",
+            what="adaptation pool",
         )
+
+    def _ssl_background_bank(self):
+        """Background clips used as ADDITIVE NOISE in the student view, capped per site.
+
+        This is the de-confounding lever: the teacher sees a clip clean, the student
+        sees it buried in noise from a DIFFERENT hydrophone, and the only way to predict
+        the teacher's tokens is to stop representing the channel. The bank is therefore
+        what the phrase "cross-hydrophone noise" actually refers to, which makes it what
+        cell C5 (background.p=0.0) is the control FOR. Uncapped it was 43.8% NorthBc and
+        28.8% WVanIsl, an effective 3.5 channels out of 15, and at those shares C4
+        against C5 would be testing whether adding those two sites' noise helps rather
+        than whether cross-hydrophone noise helps.
+
+        Drawn from the FULL manifest rather than from the capped adaptation pool, and
+        capped separately. A noise source does not need to be a training example, so
+        narrowing the bank to the capped pool would discard channel variety for nothing.
+
+        No stratification here: every clip in the bank is Background by construction, so
+        there is nothing to stratify on.
+        """
+        held_out = self.test_hydros + self.val_hydros
+        bank = self.df.filter(
+            pl.col("Labels") == "Background", ~pl.col("Dataset").is_in(held_out)
+        )
+        bank = _cap_per_hydrophone(
+            bank,
+            self.dataset_configs.get("max_bank_clips_per_hydro", None),
+            seed=int(self.dataset_configs.get("subsample_seed", 59)),
+            stratify_col=None,
+            what="background bank",
+        )
+        return bank.get_column("LocalPath").to_list()
 
     def _build_view_aug(self, view_cfg, sr, max_length, bank):
         """Build one view's augmentation pipeline from config.
@@ -193,19 +289,42 @@ class SelfDistillDataModule(LabelDataModule):
         )
 
     def probe_dataloader(self, batch_size=32):
-        """LABELLED val clips for the online ecotype probe.
+        """LABELLED clips from ONE validation hydrophone, for the online ecotype probe.
 
-        Single hydrophone by design: with recording condition held constant, the probe
-        cannot exploit a channel shortcut, so it is a clean read on whether ecotype is
-        linearly separable — which is exactly the quantity the adaptation is supposed
-        to improve.
+        Single hydrophone by design. With the recording condition held constant the
+        probe cannot score well by reading the channel instead of the call, so the
+        number is a clean read on whether ecotype is linearly separable, which is the
+        quantity the adaptation is meant to improve.
+
+        This reads `online_probe_hydro` rather than `val_hydros` because those two
+        lists now serve different purposes. `val_hydros` carries more than one site so
+        that `val/loss`, the self-supervised masked-prediction loss that drives
+        checkpoint selection, is measured across several unseen channels instead of
+        one. That is the right choice for selection and the wrong choice here: with
+        several validation hydrophones the online probe can reach a high score by
+        learning which channel a clip came from, and hydrophone identity is correlated
+        with ecotype in this dataset (Cpe_Elz is roughly 89 percent TKW), so the
+        shortcut is a large one. Pinning the probe to a single site keeps the two
+        signals honest independently.
+
+        Falls back to the first entry of `val_hydros` when the key is absent, so an
+        older dataset config still composes.
         """
         from probe_features import build_loader
 
+        hydro = self.dataset_configs.get("online_probe_hydro", None)
+        if not hydro:
+            hydro = list(self.val_hydros)[0]
+            log.warning(
+                f"no online_probe_hydro in the dataset config; falling back to "
+                f"'{hydro}'. With {len(self.val_hydros)} validation hydrophones the "
+                f"online probe can exploit a channel shortcut if this is not pinned."
+            )
         labelled = self.df.filter(
-            pl.col("Dataset").is_in(self.val_hydros)
+            (pl.col("Dataset") == hydro)
             & pl.col("Labels").is_in(list(self.labels))
         )
+        log.info(f"online probe: {labelled.height} labelled clips from '{hydro}'")
         return build_loader(
             labelled, int(self.transform_config.input.sample_rate),
             self.clip_duration, self.label_map, self.call_map,
