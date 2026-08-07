@@ -325,8 +325,69 @@ class SelfDistillDataModule(LabelDataModule):
             & pl.col("Labels").is_in(list(self.labels))
         )
         log.info(f"online probe: {labelled.height} labelled clips from '{hydro}'")
+        return self._probe_loader(labelled, batch_size)
+
+    def code_usage_dataloader(self, background, max_per_hydro=200, batch_size=32):
+        """TRAIN-hydrophone clips for the code-usage probe, split on Background.
+
+        `background=True` gives Background-labelled clips, `False` gives the labelled
+        vocalisations. Tokenising both and comparing their code histograms asks how much
+        of the codebook is spent representing NOISE rather than calls, which is the
+        direct test of whether a 1000-code codebook has capacity to spare for recording
+        condition. Splitting the Background histogram by hydrophone then asks whether it
+        is in fact spending it that way.
+
+        TRAIN hydrophones, not validation, and this is not a shortcut. The validation
+        sites are Cpe_Elz and StrGeoS1, holding 48 and 3 Background clips between them:
+        two sites, and no basis for a site-versus-code measurement at all. The reported
+        nuisance figure is computed on train for the same reason — see
+        probe.probe_nuisance_background — so both live on the same population.
+
+        Background-only is what makes the site comparison about CHANNEL rather than
+        content. Hydrophone identity correlates with ecotype here (Cpe_Elz is ~89% TKW),
+        so a site measurement over all clips can succeed by reading the vocalisation
+        instead of the recording condition. With no orca present, what separates sites is
+        instrument response, noise floor, depth and self-noise, which is the confound.
+
+        Low-SR sites are excluded, matching the reported metric's pool. They would also
+        be separable on bandwidth alone, which would inflate any site signal for a reason
+        that has nothing to do with the representation.
+
+        `max_per_hydro` caps each site so no one hydrophone dominates the pooled
+        histogram — the same concentration problem the adaptation pool had, and here it
+        would directly distort the entropy being measured. It also keeps the per-epoch
+        cost down. Absolute values therefore will not match the offline probe; read the
+        trend.
+        """
+        held = list(self.test_hydros) + list(self.val_hydros) + list(self.low_sr_hydros)
+        is_bg = pl.col("Labels") == "Background"
+        frame = self.df.filter(
+            (is_bg if background else (~is_bg & pl.col("Labels").is_in(list(self.labels))))
+            & ~pl.col("Dataset").is_in(held)
+        )
+        what = "background" if background else "vocalisation"
+        frame = _cap_per_hydrophone(
+            frame, max_per_hydro,
+            seed=int(self.dataset_configs.get("subsample_seed", 59)),
+            what=f"code-usage probe ({what})",
+        )
+        log.info(
+            f"code-usage probe [{what}]: {frame.height} clips over "
+            f"{frame.get_column('Dataset').n_unique()} train hydrophones"
+        )
+        return self._probe_loader(frame, batch_size)
+
+    def _probe_loader(self, frame, batch_size):
+        """Shared loader construction for the two online probes.
+
+        Both need the same thing — labelled clips decoded exactly as the SSL dataset
+        decodes them — and building it twice would be two places for the sample rate or
+        the clip duration to drift apart from what the model was adapted on.
+        """
+        from probe_features import build_loader
+
         return build_loader(
-            labelled, int(self.transform_config.input.sample_rate),
+            frame, int(self.transform_config.input.sample_rate),
             self.clip_duration, self.label_map, self.call_map,
             batch_size=batch_size, num_workers=self.val_loader_configs.num_workers,
         )

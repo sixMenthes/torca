@@ -59,16 +59,26 @@ class ProbeDataset(Dataset):
             wave = wave[..., start:start + self.max_length]
         elif t < self.max_length:
             wave = F.pad(wave, (0, self.max_length - t))
-        return wave
+        # Samples of REAL audio before tail padding, matching SelfDistillDataset's
+        # contract. Anything that tokenises these clips needs it, because
+        # MIMDistillation._valid_mask silently falls back to "every position is valid"
+        # when the key is absent, and padding tokenises to one constant silence code.
+        # Measured train/valid_frac is 0.945, so this is ~5% of positions rather than
+        # the ~44% several comments used to claim — but it still matters here, because
+        # the bias is UNEQUAL between subsets whose clip durations differ, which is
+        # precisely the comparison CodeUsageProbe makes between Background and
+        # vocalisation clips.
+        return wave, min(t, self.max_length)
 
     def __getitem__(self, index):
         row = self.df.row(index, named=True)
         try:
-            wave = self._load_wave(row["LocalPath"])
+            wave, n_valid = self._load_wave(row["LocalPath"])
         except Exception:
             return None
         return {
             "wave": wave,
+            "n_valid": n_valid,
             "label": self.label_map.get(row["Labels"], -1),
             "call": self.call_map.get(row.get("CalltypeCategory"), -1),
             "dataset": row["Dataset"],
@@ -81,6 +91,7 @@ def _collate(batch):
         return None
     return {
         "wave": torch.stack([b["wave"] for b in batch]),
+        "n_valid": torch.tensor([b["n_valid"] for b in batch]),
         "label": torch.tensor([b["label"] for b in batch]),
         "call": torch.tensor([b["call"] for b in batch]),
         "dataset": [b["dataset"] for b in batch],

@@ -192,11 +192,17 @@ class MIMDistillation(L.LightningModule):
     def _valid_mask(self, batch, num_patches, device):
         """(B, N) bool: positions backed by audio a human actually heard.
 
-        90% of DCLDE clips are shorter than the 3 s window and are zero-padded at the
-        tail. Letting that padding into the loss would hand the student a constant
-        "silence" code to predict for ~44% of positions — the loss would fall while
-        nothing was learned. Set distill_cfg.mask_padding=false only once the clips
-        are re-sliced as centred context windows (then every position IS real).
+        Clips ARE already centred context windows: build_clip_manifest centres a fixed
+        clip_duration window on the annotation midpoint and clamps it at the file start,
+        so there is no head padding and a clip falls short only when the source file ends
+        first. Measured train/valid_frac is 0.945, so ~5% of positions are synthetic
+        silence — not the ~44% this docstring used to claim, which described an older
+        annotation-length slicer.
+
+        Keep the mask on anyway. Padding tokenises to one constant "silence" code, so
+        even at 5% it biases any per-subset code histogram by however much the subsets'
+        clip durations differ, which is exactly what CodeUsageProbe compares. The cost is
+        negligible.
         """
         B = batch["student"].shape[0]
         if not self.mask_padding or "n_valid" not in batch:

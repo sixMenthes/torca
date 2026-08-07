@@ -88,11 +88,22 @@ class SelfDistillDataset(Dataset):
     def _fit_length(self, wave):
         """Fit to max_length, and report how much of the result is REAL audio.
 
-        90% of DCLDE clips are shorter than a 3 s window (the slicer cuts
-        [floor(begin), ceil(end)] around each annotation), so the tail padding is the
-        common case, not the exception. The model needs the valid count to keep that
-        synthetic silence out of the loss — without it the padding is
-        indistinguishable from quiet ocean once it reaches the front-end.
+        Padding is the EXCEPTION, not the common case. build_clip_manifest centres a
+        fixed clip_duration window on the annotation midpoint and clamps it at the file
+        start, so there is no head padding and a clip can only fall short when the SOURCE
+        FILE ENDS first. Measured on a real run, train/valid_frac is 0.945 — about 5% of
+        positions are synthetic silence.
+
+        (An earlier comment here claimed "90% of DCLDE clips are shorter than a 3 s
+        window (the slicer cuts [floor(begin), ceil(end)] around each annotation)". That
+        described an OLDER slicer whose clip length followed the annotation length, and
+        it is not what build_clip_manifest does. The same wrong figure had propagated
+        into four other files.)
+
+        The valid count is still worth reporting even at 5%: padding is indistinguishable
+        from quiet ocean once it reaches the front-end, and it tokenises to one constant
+        code, so it biases any per-subset code histogram by however much the subsets'
+        durations differ.
         """
         t = wave.size(-1)
         if t > self.max_length:                                 # center crop

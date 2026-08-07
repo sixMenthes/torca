@@ -47,10 +47,13 @@ distill:
   temperature: 0.05
   ema_decay: 0.996
   ema_decay_end: 0.9999      # ramped over training; null to hold ema_decay constant
-  # Keep zero-padded positions out of the loss. 90% of DCLDE clips are shorter than
-  # the 3 s window, so ~44% of positions are synthetic silence; without this the CE is
-  # dominated by predicting one constant "silence" code. Set false ONLY after
-  # re-slicing clips as centred context windows.
+  # Keep zero-padded positions out of the loss. Clips are already centred fixed-length
+  # windows clamped at the file start, so padding appears only when the source file ends
+  # first: measured train/valid_frac is 0.945, i.e. ~5% of positions, NOT the ~44% this
+  # comment used to claim (that figure described an older annotation-length slicer).
+  # Leave it on regardless — padding tokenises to one constant "silence" code, so even at
+  # 5% it biases per-subset code histograms by however much clip durations differ, which
+  # is what CodeUsageProbe compares.
   mask_padding: true
   ce_weight: 1.0
   # VICReg OFF as of 2026-08-07. Measured with ablate_terms.py, 2000 steps, four cells

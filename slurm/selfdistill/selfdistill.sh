@@ -182,7 +182,7 @@ srun python train_selfdistill.py \
     data/dataset="$DATASET" \
     trainer=single_gpu \
     trainer.devices=1 \
-    trainer.precision=bf16 \
+    trainer.precision=bf16-mixed \
     trainer.max_epochs="$MAX_EPOCHS" \
     trainer.check_val_every_n_epoch="$VAL_EVERY" \
     trainer.num_sanity_val_steps="$SANITY_STEPS" \

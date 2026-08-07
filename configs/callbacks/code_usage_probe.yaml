@@ -1,0 +1,18 @@
+code_usage_probe:
+  _target_: online_probe.CodeUsageProbe
+  # Two forward passes through the TEACHER per invocation (Background and vocalisation
+  # subsets), each ~200 clips per hydrophone over ~12 train sites, so roughly 2.4k clips
+  # each. No probe is fitted and no cross-validation is run — these are histograms — so
+  # it is much cheaper than the ecotype online probe. Raise if it still shows up in the
+  # epoch time.
+  every_n_epochs: 1
+  # Caps each hydrophone's contribution. Two reasons, and the first matters more than
+  # speed: without it the pooled histogram is dominated by whichever site has the most
+  # Background clips, which distorts the very entropy being measured. HaroStraitSouth
+  # alone holds 2093 of the 7226 train Background clips.
+  max_per_hydro: 200
+  batch_size: 32
+  # Seeds the clip-level label shuffle that gives the mutual-information null. Fixed so
+  # the null is reproducible; it is offset by the epoch number internally so successive
+  # epochs do not reuse one permutation.
+  seed: 59

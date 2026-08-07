@@ -6,4 +6,5 @@ defaults:
   - progress_bar
   - model_checkpoint
   - online_probe
+  - code_usage_probe
   - emissions

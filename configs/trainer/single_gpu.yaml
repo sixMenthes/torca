@@ -20,4 +20,7 @@ deterministic: False
 gradient_clip_val: null
 accumulate_grad_batches: 1
 #precision: 16
-precision: bf16
+# "bf16-mixed", not "bf16". Lightning maps the bare alias to the same thing but warns
+# that it is kept "for historical reasons"; naming it explicitly says what it actually
+# is, which is mixed precision with bf16 compute and fp32 master weights, not pure bf16.
+precision: bf16-mixed

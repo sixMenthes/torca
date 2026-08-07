@@ -6,9 +6,11 @@ Kept free of lightning/hydra so it can be unit-tested and reasoned about on its 
 Three pieces:
 
   * `valid_token_mask` — which patch positions correspond to audio a human actually
-    heard. 90% of DCLDE clips are shorter than the 3 s window and get zero-padded at
-    the tail, so ~44% of positions are synthetic silence on average. Those must not
-    enter the loss: the teacher assigns them one constant "silence" code, and a CE
+    heard. Clips are fixed-length windows centred on the annotation and clamped at the
+    file start, so tail padding appears only when the source file ends first: measured
+    train/valid_frac is 0.945, i.e. ~5% of positions are synthetic silence, NOT the
+    ~44% an earlier version of this comment claimed. Those positions must still be kept
+    out of the loss — the teacher assigns them one constant "silence" code, and a CE
     dominated by predicting it would fall beautifully while learning nothing.
   * `sample_student_mask` — which VALID positions to hide from the student.
   * `masked_ce` + `vicreg` — the objective itself.
