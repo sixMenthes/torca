@@ -81,11 +81,26 @@ PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
 
 # Checkpoint cadence. model_checkpoint monitors val/loss, so a checkpoint can only
 # be written on an epoch that VALIDATES — with the trainer config's
-# check_val_every_n_epoch=5 the first one lands after five full epochs (~6.2k steps
-# each). Validate every epoch for the first production run: the val set is
-# CarmanahPt alone, so a pass is cheap, and a run that dies at hour six having
-# saved nothing is not.
-MAX_EPOCHS="${MAX_EPOCHS:-5}"
+# check_val_every_n_epoch=5 the first one lands after five full epochs. Validate every
+# epoch for the first production run: the val split is two small hydrophones, so a pass
+# is cheap, and a run that dies at hour six having saved nothing is not.
+#
+# 18, not 5, and the DEFAULT rather than something you pass at submit time. Two reasons.
+#
+# The number: 5 was chosen against a 189,838-clip pool. Capping each hydrophone at
+# 10,000 took that to 51,072, which at batch 32 is 1,596 steps per epoch, so 18 epochs
+# is ~28,700 steps against the ~29,700 the old setting gave. Same amount of training,
+# and an epoch is now roughly four times faster, so the wall-clock is comparable too.
+# Both the warmup (warmup_ratio 0.067) and the EMA ramp derive from
+# trainer.estimated_stepping_batches, so they rescale to this automatically.
+#
+# The default: ALL THREE ARMS MUST TRAIN FOR THE SAME NUMBER OF EPOCHS. The study
+# compares C3/C4/C5 against each other, so a run length that differs between them is a
+# treatment nobody controlled. Passing MAX_EPOCHS on the sbatch line for the first arm
+# and forgetting it on the second is a one-keystroke way to silently ruin the ablation,
+# and it would not show up anywhere in the results. Put it here, where the three
+# submissions cannot disagree.
+MAX_EPOCHS="${MAX_EPOCHS:-18}"
 VAL_EVERY="${VAL_EVERY:-1}"
 # Two batches through the val loader BEFORE training starts. The trainer config
 # disables this, which was fine while every run had limit_val_batches=0 — but that
