@@ -169,7 +169,15 @@ echo "Staged $NCLIPS wav files to $DATA_DIR"
 [ "$NCLIPS" -gt 1000 ] || { echo "ERROR: only $NCLIPS clips staged — wrong tarball or wrong clip_duration?" >&2; exit 1; }
 
 # --- run ------------------------------------------------------------------
+# paths=cluster hydra=cluster are NOT optional. selfdistill.yaml defaults to the
+# workstation variants of both, so without these the job silently composes
+# workstation paths: hydra writes runs under $PROJECT_ROOT/tests/runs and MLflow
+# under $PROJECT_ROOT/mlruns, $OUTPUT_DIR is exported and then ignored, and
+# paths/cluster.yaml is never read at all. Nothing errors — it just puts the
+# checkpoints somewhere other than where this script says they go.
 srun python train_selfdistill.py \
+    paths=cluster \
+    hydra=cluster \
     module/network="$NETWORK" \
     data/dataset="$DATASET" \
     trainer=single_gpu \
