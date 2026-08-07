@@ -330,7 +330,21 @@ class MIMDistillation(L.LightningModule):
             cov_weight=self.cov_weight,
             within_clip_var_weight=self.within_clip_var_weight,
         )
-        loss = self.ce_weight * ce + vic
+        # The diversity term MUST be here, exactly as in training_step. It was added to
+        # the objective later and this line was not updated, which made val/loss a
+        # DIFFERENT objective from the one being optimised — and specifically the one
+        # objective under which collapse looks good.
+        #
+        # Measured (see the sweep in configs/module/network/mim_distillation.yaml): a
+        # collapsed tokenizer using 9 codes of 1000 scores ce 0.699 where a healthy one
+        # scores 2.776, and the VICReg guards read healthy throughout collapse, because
+        # saturating every coordinate gives large per-dimension variance and near-zero
+        # covariance. So on `ce + vic` alone, collapse wins by a wide margin. Since
+        # model_checkpoint monitors val/loss with mode=min, the callback would have
+        # preferentially saved the collapsed epoch — and that checkpoint is what
+        # probe_selfdistill.py reads for every adapted cell.
+        div, div_parts = self._diversity(logits, valid)
+        loss = self.ce_weight * ce + vic + self.diversity_weight * div
 
         counts = code_counts(target_indices, valid, self.fsq.codebook_size)
         self.val_code_counts += counts
@@ -340,8 +354,13 @@ class MIMDistillation(L.LightningModule):
             {
                 "val/loss": loss,
                 "val/ce": ce,
+                "val/diversity": div_parts["diversity"],
                 # per-batch support, averaged; the pooled epoch figure is val/codebook_frac
                 "val/codebook_frac_batch": used / self.fsq.codebook_size,
+                # NOT a success metric. High masked_acc is a COLLAPSE signature: the
+                # collapsed cell above scored 0.821 against the healthy cell's 0.378,
+                # because predicting one of nine codes is easy. Read it together with
+                # val/codebook_frac and token_bits, never on its own.
                 "val/masked_acc": acc,
             },
             prog_bar=True, on_step=False, on_epoch=True,

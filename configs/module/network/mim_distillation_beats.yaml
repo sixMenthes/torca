@@ -28,8 +28,13 @@ distill:
   ema_decay_end: 0.9999
   mask_padding: true
   ce_weight: 1.0
-  var_weight: 1.0
-  cov_weight: 0.04
+  # OFF as of 2026-08-07, and this MUST match mim_distillation.yaml, which carries the
+  # measurement. Summary: VICReg reads a perfect vic_cov 0.0000 on a tokenizer collapsed
+  # to 27 codes, so it cannot see the failure it was meant to guard, and it lowers
+  # codebook usage (0.747 against 0.827) when added on top of the entropy penalty. Both
+  # terms are still computed and logged, so train/vic_var remains a free diagnostic.
+  var_weight: 0.0
+  cov_weight: 0.0
   within_clip_var_weight: 0.0
   gamma: 1.0
   # MUST stay identical to mim_distillation.yaml — one recipe on both backbones is what

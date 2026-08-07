@@ -53,8 +53,32 @@ distill:
   # re-slicing clips as centred context windows.
   mask_padding: true
   ce_weight: 1.0
-  var_weight: 1.0
-  cov_weight: 0.04
+  # VICReg OFF as of 2026-08-07. Measured with ablate_terms.py, 2000 steps, four cells
+  # over the two guards with everything else held fixed:
+  #
+  #   cell        token_bits_frac  codes_used      ce  masked_acc  vic_var  vic_cov
+  #   ce                   0.0650        27.0  0.6049      0.9465   0.9249   0.0000
+  #   ce+div               0.8274       992.0  2.6435      0.4363   0.1374   0.0039
+  #   ce+vic               0.4729        78.0  1.1128      0.6966   0.0203   0.1791
+  #   ce+vic+div           0.7465       914.0  2.2866      0.4688   0.0191   0.0874
+  #
+  # Two findings. VICReg cannot SEE the failure it was supposed to guard: in the `ce`
+  # cell vic_cov reads a perfect 0.0000 while the tokenizer sits at 27 codes of 1000 —
+  # the cube-corner saturation described in the diversity_weight comment below, now
+  # measured rather than argued. And it is not free: adding it on top of the entropy
+  # penalty LOWERS codebook usage (0.747 against 0.827) because the variance and
+  # covariance constraints restrict where z can move, so the target ends up poorer.
+  #
+  # This costs nothing to reverse or to monitor. vicreg() is called unconditionally in
+  # both training_step and validation_step and vic_parts is logged whatever the weights
+  # are — the `ce` row above reports vic_var 0.9249 with both weights at zero. So the
+  # terms remain FREE DIAGNOSTICS while being out of the gradient. What they still guard
+  # against is dimensional collapse of the representation itself, which the entropy
+  # penalty structurally cannot see because it only observes the code histogram: watch
+  # train/vic_var, which sat at 0.1374 here, and set var_weight back to 1.0 if it climbs
+  # materially above that on a production run.
+  var_weight: 0.0
+  cov_weight: 0.0
   # Complementary half of the variance decomposition: the global term can be satisfied
   # by between-clip spread alone, so this is what forbids "every token in this clip is
   # identical". Off by default; turn on if codebook_frac stays high but masked_acc is
