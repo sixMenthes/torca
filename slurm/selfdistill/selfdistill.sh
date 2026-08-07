@@ -79,11 +79,21 @@ BIRDMAE_CKPT="${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}"
 BEATS_CKPT="${BEATS_CKPT:-$DATA_ROOT/BEATs_iter3.pt}"
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
 
-# Checkpoint cadence. model_checkpoint monitors val/loss, so a checkpoint can only
-# be written on an epoch that VALIDATES — with the trainer config's
-# check_val_every_n_epoch=5 the first one lands after five full epochs. Validate every
-# epoch for the first production run: the val split is two small hydrophones, so a pass
-# is cheap, and a run that dies at hour six having saved nothing is not.
+# Checkpoint cadence. model_checkpoint monitors val/loss, so a checkpoint can only be
+# written on an epoch that VALIDATES.
+#
+# VAL_EVERY=6, and the 6 is chosen to DIVIDE MAX_EPOCHS. Lightning validates when
+# (epoch + 1) % N == 0, so with 18 epochs a value of 5 would validate at 5, 10 and 15
+# and never at 18 — the final epoch would train, never checkpoint, and be discarded. Any
+# value that does not divide MAX_EPOCHS throws away the tail of the run silently. If you
+# change one of these two numbers, check the other.
+#
+# It used to be 1, which was right when an epoch was ~6,200 steps. Capping the pool made
+# it 1,596, so a crash now costs under an hour of redone work instead of several, and
+# three validations over the run is enough insurance. It also makes validation cost
+# negligible: ~100 s a time (the SSL val pass over 2,594 clips, the ecotype probe, and
+# the code-usage probe over 4,243) is five minutes across the whole run, which is why
+# code_usage_probe.every_n_epochs stays at 1 rather than being thinned further.
 #
 # 18, not 5, and the DEFAULT rather than something you pass at submit time. Two reasons.
 #
@@ -101,7 +111,7 @@ PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
 # and it would not show up anywhere in the results. Put it here, where the three
 # submissions cannot disagree.
 MAX_EPOCHS="${MAX_EPOCHS:-18}"
-VAL_EVERY="${VAL_EVERY:-1}"
+VAL_EVERY="${VAL_EVERY:-6}"
 # Two batches through the val loader BEFORE training starts. The trainer config
 # disables this, which was fine while every run had limit_val_batches=0 — but that
 # means val_ssl_set has never actually been constructed or read. A broken val path
@@ -142,6 +152,14 @@ source "$VENV/bin/activate"
 export PROJECT_ROOT OUTPUT_DIR
 export HYDRA_FULL_ERROR=1
 export TOKENIZERS_PARALLELISM=false
+# The Alliance mlflow wheel refuses a FILE-BACKED tracking store unless this is set.
+# The guard is aimed at metric logging that creates huge numbers of small files on a
+# shared parallel filesystem, which is a genuine problem there. Ours does not: the file
+# store keeps ONE file per metric key and appends to it, so an 18-epoch run writes a few
+# dozen files with a few hundred lines each. paths/cluster.yaml points mlflow_dir at
+# ${paths.scratch_dir}/mlruns, i.e. project space, which is where the checkpoints have to
+# live anyway so they survive to be rsynced back for the probes.
+export MLFLOW_ALLOW_FILE_STORE=true
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-6}"
 
 # Dataloader workers track the allocation, so changing --cpus-per-task (or the GPU

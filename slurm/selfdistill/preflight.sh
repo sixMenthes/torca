@@ -45,6 +45,11 @@ esac
 module load StdEnv/2023 python/3.11 gcc arrow/22.0.0
 source "$VENV/bin/activate"
 export PROJECT_ROOT OUTPUT_DIR HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false
+# Same as selfdistill.sh: the Alliance mlflow wheel refuses a file-backed tracking store
+# without this. It belongs here too — stage 3 instantiates the real logger, so without it
+# the preflight fails on something the job would also have failed on, which is the point,
+# but it fails for a reason you then have to fix in two places.
+export MLFLOW_ALLOW_FILE_STORE=true
 cd "$PROJECT_ROOT"
 
 echo "=== 1. imports ==="
