@@ -169,12 +169,167 @@ def encoder_from_checkpoint(ckpt_path, map_location="cpu"):
     return model.student["encoder"].eval()
 
 
-def labelled_pool(df, labels):
-    """Rows usable for probing: a known ecotype label.
+def probe_pool(df, dataset_cfg, include_low_sr=False):
+    """The rows a probe run extracts features for, and their split tags. One call.
 
-    Materialisation is NOT checked here — it is the caller's job to pass a df that
-    prepare_data has already filtered to clips on disk. Doing it in two places would
-    mean two definitions of "present", and the manifest is the one that also travels
-    to the cluster inside the tarball.
+    This replaces `labelled_pool` + a separate `split_tags` + a hand-written filter at
+    the call site. That arrangement had three gates on three different lines and only
+    two of them ran before the backbone: rows were cut to labelled ones, features were
+    computed for ALL of them, and the split was applied afterwards by masking the tag
+    array. Low-SR clips therefore cost a full forward pass each and were then never
+    selected by any mask — invisible in the results, expensive in wall-clock. Worse,
+    df and tags were built independently, so any filter added to one had to be
+    mirrored onto the other by hand or every split assignment shifted silently.
+
+    Returning both together makes that class of bug unrepresentable: there is one
+    filter, applied once, and the tags are derived from the rows that survive it.
+
+    Three gates, all of them here:
+      * LABELLED   — Labels in dataset_cfg.labels. The parquet carries rows whose
+                     label is outside the 4-class ecotype set; they have no target.
+      * MATERIALISED — NOT checked. Deliberately: prepare_data owns "exists on disk",
+                     via the cached manifest, and that manifest is what travels to the
+                     cluster inside the tarball. A second definition here would drift.
+      * IN-SPLIT   — low_sr dropped unless include_low_sr. See split_tags for why the
+                     tag exists and configs/probe.yaml for why it stays off.
+
+    Returns (df, tags) aligned row-for-row.
     """
-    return df.filter(pl.col("Labels").is_in(list(labels)))
+    import probe as probe_lib
+
+    pool = df.filter(pl.col("Labels").is_in(list(dataset_cfg.labels)))
+    tags = probe_lib.split_tags(
+        pool.get_column("Dataset").to_list(),
+        list(dataset_cfg.test_hydros),
+        list(dataset_cfg.val_hydros),
+        list(dataset_cfg.low_sr_hydros),
+    )
+    if not include_low_sr:
+        keep = tags != "low_sr"
+        pool, tags = pool.filter(pl.Series(keep)), tags[keep]
+    return pool, tags
+
+
+def split_report(df, tags, dataset_cfg, source_df=None):
+    """Human-readable composition of every split, per probe task. Returns a string.
+
+    Exists because the three probes each build their own mask over `tags` in a
+    different file, so "what is this number computed on" was only answerable by
+    reading three call sites. Print it with the results, or standalone via
+    report_splits.py.
+    """
+    import numpy as np
+
+    labels = list(dataset_cfg.labels)
+    calls = set(dataset_cfg.calls)
+    hyd = np.asarray(df.get_column("Dataset").to_list())
+    lab = np.asarray(df.get_column("Labels").to_list())
+    has_call = np.asarray([
+        c in calls for c in df.get_column("CalltypeCategory").to_list()
+    ]) if "CalltypeCategory" in df.columns else np.zeros(df.height, dtype=bool)
+    is_bg = lab == "Background"
+
+    # Provider is here because it is the constraint on ever CHANGING the split: a test
+    # hydrophone that shares a provider with a train hydrophone is not a held-out
+    # recording chain, it is the same rig at a different spot. BarkleyCanyon was chosen
+    # for test precisely because ONC appears nowhere else.
+    prov = (np.asarray(df.get_column("Provider").to_list())
+            if "Provider" in df.columns else np.array([""] * df.height))
+
+    L = []
+    w = max([len(h) for h in np.unique(hyd)] + [10])
+    p = max([len(x) for x in np.unique(prov)] + [8])
+    L.append("=== hydrophone -> split tag ===")
+    L.append(f"  {'hydrophone':<{w}} {'provider':<{p}} {'tag':<8} {'clips':>8} "
+             f"{'background':>11} {'calltype':>9}")
+    L.append("  " + "-" * (w + p + 40))
+    order = {"train": 0, "val": 1, "test": 2, "low_sr": 3}
+    for t, h in sorted({(str(tags[i]), hyd[i]) for i in range(len(hyd))},
+                       key=lambda p_: (order[p_[0]], p_[1])):
+        m = hyd == h
+        pv = "/".join(sorted(set(prov[m])))
+        L.append(f"  {h:<{w}} {pv:<{p}} {t:<8} {m.sum():>8} {(m & is_bg).sum():>11} "
+                 f"{(m & has_call).sum():>9}")
+    # Any provider spanning the train/test boundary breaks the "held-out recording
+    # chain" claim, which is what the whole test protocol rests on.
+    shared = sorted(set(prov[tags == "train"]) & set(prov[tags == "test"]))
+    if shared:
+        L.append(f"  !! provider(s) on BOTH sides of train/test: {shared} — the test "
+                 f"split is not a held-out recording chain")
+
+    tr, va, te = tags == "train", tags == "val", tags == "test"
+    nh = lambda m: len(np.unique(hyd[m]))
+
+    L.append("")
+    L.append("=== what each probe is computed on ===")
+    L.append(f"  task/ecotype   fit  {tr.sum():>7} clips / {nh(tr):>2} hydros  (train)")
+    L.append(f"                 score{te.sum():>7} clips / {nh(te):>2} hydros  (test)")
+    L.append(f"                 val split holds {va.sum()} clips / {nh(va)} hydros — used ONLY when")
+    L.append(f"                 c_selection=val; at the default train_cv it is untouched.")
+    bgm = tr & is_bg
+    small = [h for h in np.unique(hyd[bgm]) if (hyd[bgm] == h).sum() < 50]
+    L.append(f"  nuisance/bg    fit  {bgm.sum():>7} clips / {nh(bgm):>2} hydros  "
+             f"(train AND Background)")
+    L.append(f"                 stratified CV; sites with <50 background clips dropped"
+             f"{' -> ' + ', '.join(small) if small else ' (none)'}")
+    L.append(f"  task/calltype  fit  {(tr & has_call).sum():>7} clips / {nh(tr & has_call):>2} hydros  "
+             f"(train AND calltype)")
+    L.append(f"                 score{(te & has_call).sum():>7} clips / {nh(te & has_call):>2} hydros  "
+             f"(test AND calltype)")
+
+    L.append("")
+    L.append("=== excluded ===")
+    if source_df is not None:
+        n_unlab = source_df.height - source_df.filter(
+            pl.col("Labels").is_in(labels)).height
+        L.append(f"  unlabelled     {n_unlab:>7} rows  (Labels outside {labels})")
+        low = source_df.filter(
+            pl.col("Dataset").is_in(list(dataset_cfg.low_sr_hydros)))
+        L.append(f"  low_sr         {low.height:>7} rows / "
+                 f"{low.get_column('Dataset').n_unique()} hydros  "
+                 f"(no probe mask selects these; now dropped before extraction)")
+        # A config name with no rows in the manifest has TWO very different causes and
+        # only one of them is a bug, so do not report them the same way:
+        #
+        #   absent      the site genuinely has no materialised clips (never fetched, or
+        #               no rows at this clip_duration). Nothing is misclassified —
+        #               there are no rows to misclassify. Benign for the split; it is a
+        #               data-completeness fact, and one worth knowing separately.
+        #   misspelled  the site IS in the manifest under a different string, and THAT
+        #               string is the one that matters: split_tags falls through to
+        #               "train", so a band-limited site lands in the probe's fit set
+        #               and nothing reports it.
+        #
+        # The two are indistinguishable from the config alone, which is why the check
+        # offers close matches among the names that ARE present — that is what tells
+        # them apart.
+        import difflib
+
+        present = set(source_df.get_column("Dataset").unique().to_list())
+        untagged = sorted(
+            present
+            - set(dataset_cfg.test_hydros)
+            - set(dataset_cfg.val_hydros)
+            - set(dataset_cfg.low_sr_hydros)
+        )
+        for key in ("test_hydros", "val_hydros", "low_sr_hydros"):
+            for h in dataset_cfg[key]:
+                if h in present:
+                    continue
+                near = difflib.get_close_matches(h, untagged, n=3, cutoff=0.6)
+                if near:
+                    L.append(f"  !! {key}: '{h}' has no rows, but these UNTAGGED "
+                             f"manifest names resemble it: {near}")
+                    L.append(f"     -> if one of those is the same site, it is being "
+                             f"treated as TRAIN. Fix the spelling in the config.")
+                else:
+                    L.append(f"  -- {key}: '{h}' has no rows in the manifest and no "
+                             f"similar name is untagged (site absent, not misspelled)")
+    L.append("")
+    L.append("  NOTE the asymmetry with adaptation, which is deliberate: "
+             "SelfDistillDataModule")
+    L.append("  holds out test+val ONLY, so the SSL pool INCLUDES the low-SR sites, and "
+             "the")
+    L.append("  background bank draws noise from them too. Adapt on everything, "
+             "evaluate clean.")
+    return "\n".join(L)

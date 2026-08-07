@@ -54,7 +54,8 @@ from probe_features import (
     encoder_from_checkpoint,
     extract_backbone,
     extract_mfcc,
-    labelled_pool,
+    probe_pool,
+    split_report,
 )
 from selfdistill_datamodule import SelfDistillDataModule
 from util.pylogger import get_pylogger
@@ -115,22 +116,18 @@ def run(cfg: DictConfig):
     # hypothetical.
     dm.prepare_data()
 
-    df = labelled_pool(dm.df, cfg.data.dataset.labels)
-    log.info(f"{df.height} labelled clips")
+    # Rows and split tags in one call, so they cannot drift apart — see probe_pool.
+    # Split tags come from the same split the adaptation used, so the probe's test
+    # hydrophones are ones the backbone never adapted on.
+    df, tags = probe_pool(dm.df, cfg.data.dataset,
+                          include_low_sr=cfg.include_low_sr)
+    log.info(f"{df.height} clips in the probe pool")
+    print("\n" + split_report(df, tags, cfg.data.dataset, source_df=dm.df) + "\n")
 
     sr = int(cfg.data.transform.input.sample_rate)
     loader = build_loader(
         df, sr, cfg.data.dataset.clip_duration, dm.label_map, dm.call_map,
         batch_size=cfg.batch_size, num_workers=cfg.num_workers,
-    )
-
-    # Split tags come from the same split the adaptation used, so the probe's test
-    # hydrophones are ones the backbone never adapted on.
-    tags = probe_lib.split_tags(
-        df.get_column("Dataset").to_list(),
-        list(cfg.data.dataset.test_hydros),
-        list(cfg.data.dataset.val_hydros),
-        list(cfg.data.dataset.low_sr_hydros),
     )
 
     # Feature extraction is the expensive part (a backbone forward over every
@@ -192,6 +189,12 @@ def run(cfg: DictConfig):
             "encoder": "none (MFCC)" if cfg.source == "mfcc"
                        else cfg.module.network.encoder.name,
             "clip_duration": cfg.data.dataset.clip_duration,
+            # Not cosmetic. transform.input.sample_rate interpolates
+            # module.network.sampling_rate, so it is 16 kHz for BEATs and 32 kHz for
+            # Bird-MAE — the frozen cells are NOT bandwidth-matched to each other, and
+            # nothing in the results table said so. Surface it as a params column.
+            "sample_rate": sr,
+            "include_low_sr": bool(cfg.include_low_sr),
             "test_hydros": str(list(cfg.data.dataset.test_hydros)),
             "n_labelled_clips": df.height,
         })
@@ -209,7 +212,7 @@ def run(cfg: DictConfig):
         # advantage the frozen control never gets.
         task = probe_lib.probe_split_protocol(
             X, meta["label"], tags, hydrophone=meta["hydrophone"],
-            c_selection=cfg.c_selection,
+            c_selection=cfg.c_selection, include_low_sr=cfg.include_low_sr,
         )
         # NUISANCE: hydrophone decodability from BACKGROUND clips only, on train.
         # Background-only is what makes it a channel measurement rather than a content

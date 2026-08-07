@@ -36,6 +36,19 @@ layers: null
 # selection rests on a single recording condition.
 c_selection: train_cv
 
+# Fold the low-SR hydrophones into the probe's TRAIN set. Off, and it should stay off:
+# those sites are band-limited well below the backbone's input rate, so a clip from one
+# is upsampled and carries a hard spectral cliff with silence above it — a per-site
+# fingerprint that is trivially decodable and would inflate the nuisance metric for
+# reasons that have nothing to do with the representation.
+#
+# The flag now also controls EXTRACTION, not just the fit. It always excluded them from
+# every reported number (probe_split_protocol defaulted to False; the nuisance and
+# call-type masks test tags == "train", which "low_sr" is not) — but the backbone ran a
+# forward pass over them anyway and the features were discarded unread. That was most
+# of the probe's wall-clock and none of its result.
+include_low_sr: false
+
 # Energy / CO2eq accounting. See configs/callbacks/emissions.yaml for why offline is
 # the default and why `region` matters far more than the country code.
 emissions:

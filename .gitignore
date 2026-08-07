@@ -24,3 +24,7 @@ scripts/foundation_model/
 mlflow.db
 compute_stats.py
 check_pcen.py
+
+# report_splits.py output — regenerated on demand, not a source artefact
+splits.txt
+report_splits.log
