@@ -210,8 +210,29 @@ distill:
   # near the collapse the ablation found at weight zero, which was 27 codes of 1000 at
   # coverage 0.065.
   #
-  # 0.5 is the intended setting. It sits far below anything a healthy run has produced,
-  # the lowest being 0.688 after epoch 1, and far above the collapse regime.
+  # 0.7 is the intended setting. Calibrated by measuring coverage against the number of
+  # codes actually in use, on synthetic assignments at both codebook sizes
+  # (scratch/test_hinge_floor.py). The column is the coverage the hinge sees:
+  #
+  #     codes in use     K=1000     K=240
+  #             1000      0.985         -
+  #              240          -     0.996
+  #              200      0.806     0.977
+  #              100      0.719     0.890
+  #               46      0.620     0.774
+  #               32      0.563     0.721
+  #               16      0.484     0.588
+  #                9      0.390     0.467
+  #
+  # So a floor of 0.7 stays silent until roughly a HUNDRED codes at K=1000 and roughly
+  # THIRTY at K=240, which is about a tenth of the codebook in both cases. Expressing the
+  # floor as a fraction rather than as a code count is what makes it permit the same
+  # PROPORTIONAL collapse at either size, which is why it is defined this way.
+  #
+  # A floor of 0.5 was the first proposal and is much deeper: it tolerates a slide to
+  # about thirty codes at K=1000 and about nine at K=240, so it fires only at outright
+  # collapse. Healthy runs sit at 0.90 to 0.98 and the lowest ever seen after epoch 1 is
+  # 0.688, so 0.7 is still well clear of anything normal.
   #
   # Two cautions. The hinge is REACTIVE and does nothing until coverage has already fallen
   # through the floor, so watch train/coverage against train/codes_used_batch and raise
