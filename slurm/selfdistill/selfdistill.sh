@@ -130,8 +130,21 @@ SANITY_STEPS="${SANITY_STEPS:-2}"
 # alone. The codebook spends as much capacity representing NOISE as representing calls,
 # slightly more in fact, and a codebook with nothing held in reserve is the mechanism by
 # which spare capacity ends up encoding recording condition. Lowering the entropy penalty
-# is the direct lever on that. At 2000 steps a weight of 1.0 gave token_bits_frac 0.827
-# and it drifted to 0.976 over eighteen epochs, so 0.3 is aimed at settling near 0.85.
+# is the direct lever on that.
+#
+# RESULT, and it did not work. The full trajectory says the codebook does not "drift"
+# open at all: token_bits_frac is 0.751 after epoch 1 and 0.985 after epoch 2, then flat
+# for sixteen more. At 0.3 it is 0.696 and 0.958, and it converges to 0.965 against
+# 0.976. Cutting the weight by seventy percent moved the endpoint by one percent, so the
+# entropy penalty is not what holds the codebook open in this range. Worse for the
+# hypothesis, site information in the codes went UP: val/code_bg_site_mi_excess ended at
+# 0.727 bits against 0.511 at weight 1.0. The pretext task did get easier (masked_acc
+# 0.201 against 0.138, ce 8.86 against 11.44) but ecotype on the held-out site was flat
+# at 0.709 against 0.722.
+#
+# If anything the data points the other way, since the run with MORE entropy pressure
+# had less site information in its codes. A weight of 3.0 is the indicated next probe of
+# this lever, not a lower one.
 #
 # Anything set here is appended to the task_name, so the two runs are distinguishable in
 # MLflow by NAME and not only by their params column. That matters more than it sounds:
@@ -209,9 +222,27 @@ case "$ARM" in
     NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
     CKPT="$BIRDMAE_CKPT"
     EXTRA=(data.transform.augmentations.teacher.background.p=0.8) ;;
+  birdmae_sitepca)
+    # The other attack on the same failure. Instead of mixing noise into the teacher's
+    # INPUT, remove the recording-channel subspace from the teacher's REPRESENTATION:
+    # the between-site directions are estimated from running per-site mean tokens and
+    # projected out of the 768-dim tokens before the projector, so the FSQ targets
+    # cannot encode hydrophone identity.
+    #
+    # Independent of birdmae_teacherbg, so the two are readable against each other. This
+    # one is the more surgical of the pair — it removes site and nothing else, where
+    # background mixing also perturbs content — and the more likely to be inert, since
+    # it can only remove what the per-site means actually capture.
+    #
+    # Watch train/site_energy. Zero for the whole run means the warmup never finished or
+    # the between-site directions carry nothing, and either way the run is C4 with extra
+    # steps rather than a treatment.
+    NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
+    CKPT="$BIRDMAE_CKPT"
+    EXTRA=(module.network.distill.site_projection.enabled=true) ;;
   *)
     echo "ERROR: unknown arm '$ARM'" >&2
-    echo "       (birdmae | beats | birdmae_nobg | birdmae_teacherbg)" >&2
+    echo "       (birdmae | beats | birdmae_nobg | birdmae_teacherbg | birdmae_sitepca)" >&2
     exit 1 ;;
 esac
 

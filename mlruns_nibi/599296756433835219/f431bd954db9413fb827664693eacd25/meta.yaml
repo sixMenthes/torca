@@ -1,0 +1,14 @@
+artifact_uri: /home/sixmints/projects/def-ruthjoy/sixmints/mlruns/599296756433835219/f431bd954db9413fb827664693eacd25/artifacts
+end_time: 1786277848152
+entry_point_name: ''
+experiment_id: '599296756433835219'
+lifecycle_stage: active
+run_id: f431bd954db9413fb827664693eacd25
+run_name: selfdistill_birdmae_div0.3_2026-08-09_074735
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1786276063012
+status: 3
+tags: []
+user_id: sixmints

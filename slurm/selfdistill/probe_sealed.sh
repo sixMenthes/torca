@@ -96,9 +96,9 @@ case "$CELL" in
   # matters for the same reason C4 and C5 have separate labels — the three differ only
   # in which checkpoint they read, and an unlabelled run is indistinguishable in the
   # results table from the cell it is supposed to be compared against.
-  C4|C5|C6) SOURCE="adapted"; NETWORK="mim_distillation"; DATASET="dclde_selfdistill_birdmae"
+  C4|C5|C6|C7) SOURCE="adapted"; NETWORK="mim_distillation"; DATASET="dclde_selfdistill_birdmae"
          BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
-  *) echo "unknown cell '$CELL' (C0 | C1 | C2 | C3 | C4 | C5 | C6)" >&2; exit 1 ;;
+  *) echo "unknown cell '$CELL' (C0 | C1 | C2 | C3 | C4 | C5 | C6 | C7)" >&2; exit 1 ;;
 esac
 if [ "$SOURCE" = "adapted" ] && [ -z "$CKPT_PATH" ]; then
   echo "ERROR: cell $CELL is an adapted cell and needs a checkpoint as the second argument" >&2

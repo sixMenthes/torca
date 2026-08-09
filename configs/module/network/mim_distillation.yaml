@@ -136,17 +136,64 @@ distill:
   # near-uniform usage also asserts something false about the data, where Background is
   # common and calls are rare.
   #
-  # A comparison run at 0.3 is in flight, aimed at settling token_bits_frac near 0.85.
-  # Launch it with DIVERSITY_WEIGHT=0.3 rather than by editing this line, so the two
-  # runs differ in one term and the arms cannot silently disagree — see
-  # slurm/selfdistill/selfdistill.sh. Change the default here only once the comparison
-  # is decided, because C3, C4 and C5 must all train under whatever it says.
+  # The 0.3 comparison has now run, and it argues for LEAVING THIS AT 1.0.
+  #
+  #   metric, at epoch 18            div=1.0   div=0.3
+  #   train/token_bits_frac            0.976     0.965
+  #   val/code_bg_site_mi_excess       0.511     0.727   <- worse
+  #   val/probe_eco_1site              0.722     0.709
+  #   train/masked_acc_epoch           0.138     0.201   <- better
+  #   train/ce_epoch                   11.44      8.86
+  #
+  # Two things to take from it. The codebook does not drift open over training, it
+  # saturates by EPOCH 2 (0.751 then 0.985 at weight 1.0, 0.696 then 0.958 at 0.3), so
+  # the endpoints differ by one percent after a seventy percent cut to the weight — this
+  # lever barely moves the quantity it was chosen for. And site information in the codes
+  # went the WRONG way, which inverts the "spare capacity gets spent on channel"
+  # reasoning that motivated the run. The plausible replacement reading is that strong
+  # entropy pressure spreads codes in a way that decorrelates them from site, while
+  # relaxing it lets the tokenizer cluster on natural structure, and in this dataset
+  # recording chain is natural structure.
+  #
+  # So the indicated next probe of this lever is 3.0, not something lower. Use
+  # DIVERSITY_WEIGHT rather than editing this line, because C3, C4 and C5 must all train
+  # under whatever it says and an arm that silently disagrees is an uncontrolled
+  # treatment.
   diversity_weight: 1.0
   # Weight on the E[H(q)] half of the LFQ form. OFF, unlike LFQ: at this sharp a
   # temperature per-token entropy is already ~0, so it adds nothing and dilutes the
   # coverage signal. Measured at 1.0 it INVERTS the ordering — a collapsed batch
   # scores better than a healthy one, because collapsed z sits far from most codes
   # and so has a sharper per-token softmax. Only useful in softer regimes.
+  # Strip the recording-channel subspace out of the TEACHER's tokens before they are
+  # quantised, so the FSQ targets cannot encode which hydrophone a clip came from.
+  #
+  # This is aimed at the same failure the birdmae_teacherbg arm is: C4's nuisance metric
+  # rose from 0.902 frozen to 0.947 adapted, and CodeUsageProbe showed the target codes
+  # carrying 0.51 bits of site information, so the cross-entropy was paying the student
+  # to recover the hydrophone through the interference. teacherbg attacks that by making
+  # the teacher's INPUT channel-mixed; this attacks it by removing the channel from the
+  # teacher's REPRESENTATION. They are independent and can be read against each other.
+  #
+  # enabled: false leaves the objective bit-identical to today. Turn it on with the
+  # birdmae_sitepca arm, not by editing this line, so the arms cannot disagree.
+  site_projection:
+    enabled: false
+    # null means S-1, the full rank of the centred per-site mean matrix, which is
+    # equivalent to subtracting each site's mean. NOT a small number: measured on
+    # synthetic tokens with 12 sites, removing 4 of the 11 available directions left
+    # site decodability at 1.000, and only k = S-1 moved it at all. Content survived
+    # the full removal untouched. The sweep is in the module docstring.
+    n_components: null
+    # EMA rate on the running per-site means. They have to track the encoder, which
+    # moves throughout training, rather than be estimated once at the start.
+    momentum: 0.05
+    # Projection stays OFF until every site seen has contributed this many batches.
+    # Projecting on noisy means would corrupt the targets exactly while the codebook is
+    # forming, which is epochs 1 and 2 — the codebook reaches its final entropy by
+    # epoch 2, so there is no room to recover from a bad start there.
+    warmup_steps: 50
+    max_sites: 64
   diversity_sample_weight: 0.0
   # null = score coverage at the CE temperature. Counterintuitive but measured: at
   # 0.05 the ordering across healthy/16/4/1-code cases is monotonic with 0.60 of

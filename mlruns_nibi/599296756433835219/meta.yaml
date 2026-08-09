@@ -1,0 +1,9 @@
+artifact_location: /home/sixmints/projects/def-ruthjoy/sixmints/mlruns/599296756433835219
+creation_time: 1786136245203
+effective_trace_archival_retention: null
+experiment_id: '599296756433835219'
+last_update_time: 1786136245203
+lifecycle_stage: active
+name: selfdistill_training
+trace_location: null
+workspace: default
