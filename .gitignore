@@ -4,6 +4,12 @@ logs/
 # inside the working tree; these are run artefacts, not source. Set TORCA_MLFLOW_DIR
 # to move it out of the repo entirely.
 mlruns/
+# Stores rsynced back from the cluster. The bare `mlruns/` rule above only matches
+# directories actually NAMED mlruns, so it covered mlruns_nibi/mlruns/ but not the
+# layout an rsync with a different trailing slash produces, where the experiment ids
+# land directly under mlruns_nibi/. 838 metric files were committed that way once.
+mlruns_nibi/
+runs_nibi/
 .venv/
 /data/
 inspect_weights.py
