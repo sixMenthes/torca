@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import hydra
+import numpy as np
 import torch
 from omegaconf import DictConfig
 
@@ -119,9 +120,13 @@ def run(cfg: DictConfig):
     # Rows and split tags in one call, so they cannot drift apart — see probe_pool.
     # Split tags come from the same split the adaptation used, so the probe's test
     # hydrophones are ones the backbone never adapted on.
+    # seal_test drops the held-out rows HERE, before the backbone runs, so the model
+    # never sees a test clip rather than seeing it and having the result masked away.
     df, tags = probe_pool(dm.df, cfg.data.dataset,
-                          include_low_sr=cfg.include_low_sr)
-    log.info(f"{df.height} clips in the probe pool")
+                          include_low_sr=cfg.include_low_sr,
+                          seal_test=cfg.seal_test)
+    log.info(f"{df.height} clips in the probe pool"
+             + (" (TRAIN ONLY — test split sealed)" if cfg.seal_test else ""))
     print("\n" + split_report(df, tags, cfg.data.dataset, source_df=dm.df) + "\n")
 
     sr = int(cfg.data.transform.input.sample_rate)
@@ -206,14 +211,30 @@ def run(cfg: DictConfig):
     chance = None
 
     for name, (X, meta) in cells.items():
-        # TASK: fit on train hydros, pick C on val, evaluate once on the held-out test
-        # hydros. NOT GroupKFold over everything — that leaks adaptation-train
-        # hydrophones into the probe's test folds and hands the adapted cell an
-        # advantage the frozen control never gets.
-        task = probe_lib.probe_split_protocol(
-            X, meta["label"], tags, hydrophone=meta["hydrophone"],
-            c_selection=cfg.c_selection, include_low_sr=cfg.include_low_sr,
-        )
+        if cfg.seal_test:
+            # TASK, sealed variant: GroupKFold BY HYDROPHONE within the train split.
+            # Each fold is scored on train sites its own fit never saw, which is the
+            # structure of the reported protocol without spending the test split. The
+            # same quantity the online TrainCVProbe logs as val/probe_eco_cvtrain, so
+            # the trajectory during training and this endpoint are directly comparable.
+            m = tags == "train"
+            task = probe_lib.probe_cv(
+                X[m], meta["label"][m], groups=meta["hydrophone"][m], cv="group",
+                seed=cfg.seed,
+            )
+            # probe_split_protocol's extra keys, so the printing and logging below do
+            # not need a branch for every field.
+            task.update({"C": 1.0, "per_hydrophone": {},
+                         "n_train": int(m.sum()), "n_test": 0})
+        else:
+            # TASK: fit on train hydros, pick C on val, evaluate once on the held-out
+            # test hydros. NOT GroupKFold over everything — that leaks adaptation-train
+            # hydrophones into the probe's test folds and hands the adapted cell an
+            # advantage the frozen control never gets.
+            task = probe_lib.probe_split_protocol(
+                X, meta["label"], tags, hydrophone=meta["hydrophone"],
+                c_selection=cfg.c_selection, include_low_sr=cfg.include_low_sr,
+            )
         # NUISANCE: hydrophone decodability from BACKGROUND clips only, on train.
         # Background-only is what makes it a channel measurement rather than a content
         # one — see probe.probe_nuisance_background.
@@ -227,6 +248,10 @@ def run(cfg: DictConfig):
         has_call = meta["call"] >= 0
         train_m = has_call & (tags == "train")
         test_m = has_call & (tags == "test")
+        if cfg.seal_test:
+            # Its test mask IS the sealed split, so there is no sealed variant of this
+            # one to fall back to. Skipped rather than approximated.
+            train_m = test_m = np.zeros(len(tags), dtype=bool)
         if train_m.sum() > 0 and test_m.sum() > 0:
             ct_C, _ = probe_lib.select_C(
                 X[train_m], meta["call"][train_m], meta["hydrophone"][train_m]
@@ -244,9 +269,13 @@ def run(cfg: DictConfig):
         chance = (task["majority_baseline"], nuis["majority_baseline"])
 
         if logger:
+            # The metric KEY carries the protocol. A sealed run and a reported run are
+            # different quantities and must never overlay each other in the UI, which
+            # is exactly what would happen if both wrote {name}/task_ecotype.
+            task_key = "task_ecotype_cvtrain" if cfg.seal_test else "task_ecotype"
             metrics = {
-                f"{name}/task_ecotype": task["balanced_acc"],
-                f"{name}/task_ecotype_chance": task["majority_baseline"],
+                f"{name}/{task_key}": task["balanced_acc"],
+                f"{name}/{task_key}_chance": task["majority_baseline"],
                 f"{name}/nuisance_bg": nuis["balanced_acc"],
                 f"{name}/nuisance_bg_std": nuis["std"],
                 f"{name}/nuisance_bg_chance": nuis["majority_baseline"],
@@ -271,11 +300,18 @@ def run(cfg: DictConfig):
             logger.log_metrics(metrics)
 
     if chance:
-        print(f"\nchance: ecotype {chance[0]:.3f} (test split), "
+        where = "train, grouped CV" if cfg.seal_test else "test split"
+        print(f"\nchance: ecotype {chance[0]:.3f} ({where}), "
               f"hydrophone {chance[1]:.3f} "
               f"({nuis['n_hydrophones']} hydros, {nuis['n_clips']} Background clips)")
-        print(f"n_train={task['n_train']} n_test={task['n_test']} "
-              f"(C selected by {cfg.c_selection})")
+        if cfg.seal_test:
+            print(f"n_train={task['n_train']} over {task['n_folds']} hydrophone folds; "
+                  f"TEST SPLIT NOT TOUCHED, call-type skipped. The ecotype number here "
+                  f"is optimistic against the reported one — the probe's folds are "
+                  f"grouped by site but the backbone adapted on all of them.")
+        else:
+            print(f"n_train={task['n_train']} n_test={task['n_test']} "
+                  f"(C selected by {cfg.c_selection})")
         print("nuisance = hydrophone decodability from BACKGROUND clips only, so it "
               "measures channel, not content.\nCompare frozen vs adapted; the drop is "
               "the result. The background.p=0.0 run is the control that attributes it.")

@@ -1,0 +1,23 @@
+train_cv_probe:
+  _target_: online_probe.TrainCVProbe
+  # Both co-primary metrics, cross-validated inside the TRAIN hydrophones so that
+  # watching them during tuning costs nothing methodologically. The reported task
+  # number lives in probe_selfdistill.py and touches the sealed test split exactly
+  # once; this is what may be read while iterating. See the class docstring for why
+  # the task figure here reads higher than the reported one.
+  every_n_epochs: 1
+  # One ViT-B forward pass over roughly max_per_hydro x 10 train sites, so ~3k clips,
+  # plus a GroupKFold and a StratifiedKFold logistic regression on the pooled features.
+  # The forward pass dominates. Larger caps buy a steadier nuisance estimate, since the
+  # hydrophone is the label there and each site contributes only its Background rows;
+  # lower this first if the callback shows up in the epoch time.
+  max_per_hydro: 300
+  batch_size: 32
+  # Sites with fewer Background clips than this are dropped from the NUISANCE probe
+  # only. A hydrophone contributing three Background clips destabilises the stratified
+  # CV without adding information, and it also drags the chance level around from epoch
+  # to epoch, which makes the trend unreadable. Matches probe.probe_nuisance_background's
+  # own default so the online figure and the reported one filter identically.
+  min_bg_per_hydro: 50
+  C: 1.0
+  seed: 59

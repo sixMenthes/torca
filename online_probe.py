@@ -22,6 +22,30 @@ It is a MONITORING signal, not the reported metric. The reported number comes fr
 probe_selfdistill.py, which fits on train hydrophones and evaluates once on the sealed
 test split. This one trains and tests inside a single hydrophone by cross-validation,
 so it is in-domain and not comparable to that.
+
+Naming scheme for the ecotype balanced accuracies
+-------------------------------------------------
+Three probes in this project report an ecotype balanced accuracy under three different
+protocols, and their values are not comparable to one another. The metric names carry
+the protocol so that a plot cannot silently mix them:
+
+  val/probe_eco_1site     OnlineProbe, here. StratifiedKFold WITHIN the single site
+                          named by `online_probe_hydro`. In-domain and channel-free,
+                          but one recording condition and a few hundred clips.
+  val/probe_eco_cvtrain   TrainCVProbe, below. GroupKFold BY HYDROPHONE across the
+                          train sites, so each fold scores sites its own probe never
+                          saw. This is the closest in-training mirror of the reported
+                          protocol, and it is still optimistic because the BACKBONE
+                          adapted on all of these sites even though the probe did not.
+  test/probe_eco_traintest  probe_selfdistill.py, offline. Fit on train hydrophones,
+                          scored ONCE on the sealed test split. The reported number,
+                          and the only one that may not be used to choose anything.
+
+The nuisance metric follows the same convention. `val/probe_nuis_cvtrain` is hydrophone
+decodability from Background clips over the train sites, which is the SAME population
+the reported nuisance figure uses (probe.probe_nuisance_background masks on
+tags == "train"), so unlike the task metric it differs from the reported one only by
+the per-site cap and can be read as a genuine preview.
 """
 
 import numpy as np
@@ -100,13 +124,145 @@ class OnlineProbe(Callback):
         # stratified, not grouped: there is only one hydrophone here, so there is no
         # group to hold out — and equally no channel shortcut to guard against.
         res = probe_lib.probe_cv(X, y, cv="stratified", C=self.C)
+        # Named _1site, not probe_ecotype, because three probes with three different
+        # protocols now report an ecotype balanced accuracy and the numbers are NOT
+        # comparable to each other. See the module docstring for the naming scheme.
+        # Runs before 2026-08-09 logged this same quantity as val/probe_ecotype.
         pl_module.log_dict(
             {
-                "val/probe_ecotype": res["balanced_acc"],
-                "val/probe_ecotype_chance": res["majority_baseline"],
+                "val/probe_eco_1site": res["balanced_acc"],
+                "val/probe_eco_1site_chance": res["majority_baseline"],
             },
             prog_bar=True, sync_dist=True,
         )
+
+
+class TrainCVProbe(Callback):
+    """Both co-primary metrics, cross-validated inside TRAIN, every N validation epochs.
+
+    The reason this exists is methodological rather than convenient. The reported task
+    number is fit on train and scored once on the sealed test hydrophones, so it cannot
+    be watched while tuning without spending the test split on hyperparameter search:
+    look at it, change something, look again, and it has stopped being evidence. Both
+    numbers here are computed entirely on train hydrophones, so there is nothing to burn
+    and they can be read every validation epoch for as many runs as it takes.
+
+    One forward pass, two probes, because the expensive part is the encoder and both
+    probes want features on the same clips:
+
+      val/probe_eco_cvtrain    ecotype balanced accuracy, GroupKFold BY HYDROPHONE. The
+                               grouping is what makes it informative: with sites split
+                               across folds the probe is scored on recording conditions
+                               its own fit never saw, which is the structure of the
+                               reported protocol. Ungrouped CV here would let the probe
+                               identify the channel instead of the call, and hydrophone
+                               correlates with ecotype in this dataset.
+      val/probe_nuis_cvtrain   hydrophone decodability from BACKGROUND clips,
+                               StratifiedKFold. Down is good. Restricting to Background
+                               is what makes it a measurement of channel rather than of
+                               content. This is the co-primary metric that the pretext
+                               diagnostics cannot see at all: token entropy, code usage
+                               and cross-entropy all describe the tokenizer and none of
+                               them says whether adaptation is moving the confound.
+
+    Read the pair jointly, as the study does: task up AND nuisance down together. Either
+    one alone is satisfiable by something uninteresting.
+
+    Interpretation caveat for the task number. The backbone adapted on every hydrophone
+    in this pool, so even with the probe's folds grouped by site the FEATURES are
+    in-domain, and this will read higher than the sealed-test figure. It is a trend
+    instrument. Comparing it across epochs of one run is sound; comparing its level
+    against the reported number is not.
+    """
+
+    def __init__(self, every_n_epochs=1, max_per_hydro=300, batch_size=32,
+                 min_bg_per_hydro=50, C=1.0, seed=59):
+        super().__init__()
+        self.every_n_epochs = int(every_n_epochs)
+        self.max_per_hydro = max_per_hydro
+        self.batch_size = batch_size
+        self.min_bg_per_hydro = min_bg_per_hydro
+        self.C = C
+        self.seed = seed
+
+    @torch.no_grad()
+    def on_validation_epoch_end(self, trainer, pl_module):
+        if trainer.sanity_checking:
+            return
+        if (trainer.current_epoch + 1) % self.every_n_epochs != 0:
+            return
+        dm = trainer.datamodule
+        if dm is None or not hasattr(dm, "train_probe_dataloader"):
+            return
+
+        encoder = pl_module.student["encoder"]
+        was_training = encoder.training
+        encoder.eval()
+
+        # See OnlineProbe: fast_dev_run bounds the train and val LOOPS but not a
+        # dataloader a callback builds for itself, and this one is the largest of the
+        # three at roughly max_per_hydro x 10 sites.
+        max_batches = 2 if trainer.fast_dev_run else None
+
+        feats, labels, sites = [], [], []
+        try:
+            loader = dm.train_probe_dataloader(
+                max_per_hydro=self.max_per_hydro, batch_size=self.batch_size
+            )
+            for i, batch in enumerate(loader):
+                if max_batches is not None and i >= max_batches:
+                    break
+                if batch is None:
+                    continue
+                wave = batch["wave"].to(pl_module.device)
+                feats.append(encoder.pooled(wave).float().cpu().numpy())
+                labels.append(batch["label"].numpy())
+                sites.extend(batch["dataset"])
+        except Exception as e:                       # never let monitoring kill a run
+            log.warning(f"train-CV probe feature extraction failed: {e}")
+            return
+        finally:
+            if was_training:
+                encoder.train()
+
+        if not feats:
+            return
+        X = np.concatenate(feats, 0)
+        y = np.concatenate(labels, 0)
+        h = np.asarray(sites)
+        metrics = {}
+
+        # Task: grouped by hydrophone, so no fold shares a recording condition.
+        try:
+            if len(np.unique(y)) >= 2 and len(np.unique(h)) >= 2:
+                res = probe_lib.probe_cv(X, y, groups=h, cv="group", C=self.C,
+                                         seed=self.seed)
+                metrics["val/probe_eco_cvtrain"] = res["balanced_acc"]
+                metrics["val/probe_eco_cvtrain_std"] = res["std"]
+                metrics["val/probe_eco_cvtrain_chance"] = res["majority_baseline"]
+        except Exception as e:
+            log.warning(f"train-CV ecotype probe failed: {e}")
+
+        # Nuisance: the same X, restricted to Background rows. probe_nuisance_background
+        # owns the min_per_hydro filter and the Background masking, so it is called with
+        # an all-"train" tag array rather than reimplemented here — the reported figure
+        # then comes from exactly the same function.
+        try:
+            bg_index = getattr(dm, "label_map", {}).get("Background", None)
+            if bg_index is not None:
+                res = probe_lib.probe_nuisance_background(
+                    X, h, np.full(len(y), "train"), y == bg_index,
+                    min_per_hydro=self.min_bg_per_hydro, C=self.C, seed=self.seed,
+                )
+                metrics["val/probe_nuis_cvtrain"] = res["balanced_acc"]
+                metrics["val/probe_nuis_cvtrain_std"] = res["std"]
+                metrics["val/probe_nuis_cvtrain_chance"] = res["majority_baseline"]
+                metrics["val/probe_nuis_n_hydros"] = float(res["n_hydrophones"])
+        except Exception as e:
+            log.warning(f"train-CV nuisance probe failed: {e}")
+
+        if metrics:
+            pl_module.log_dict(metrics, prog_bar=False, sync_dist=True)
 
 
 def _entropy_bits(counts):

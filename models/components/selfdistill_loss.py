@@ -128,6 +128,61 @@ def saturation_frac(z, fsq, valid, thresh=0.99):
         return (sel.abs() >= thresh).to(torch.float32).mean()
 
 
+def quantisation_gap(z, fsq, logits, target_indices, mask, temperature):
+    """How far the student lands from the teacher's code, measured WITHOUT the temperature.
+
+    `masked_ce` and `train/masked_acc` are both poor instruments for this. Accuracy is
+    a yes/no question that discards the size of an error, and cross-entropy is
+    -ln q(true) where q is a softmax over -d^2/temperature, so at temperature=0.05 the
+    softmax is effectively one-hot and the loss value becomes (1 - accuracy) times a
+    near-constant miss cost. The eighteen-epoch run made that concrete: ce sat at 11.4
+    against a nominal chance of ln(1000)=6.908, which reads as catastrophic, while
+    accuracy sat at 137x chance. Nothing was catastrophic; the number is simply scaled
+    by 1/temperature. Changing `temperature` moves it without changing the model.
+
+    The three quantities here are all invariant to `temperature`, so they stay
+    comparable across configurations that the loss curve does not.
+
+      gap        mean of d^2(true) - d^2(nearest), in the codebook's own normalised
+                 space. Zero when the teacher's code IS the nearest one. This is the
+                 quantity the cross-entropy is a rescaling of: a miss costing
+                 -ln q ~ 13 at temperature 0.05 corresponds to gap ~ 0.65.
+      steps_l1   mean L1 distance in LATTICE INDEX units, i.e. how many single-axis
+                 quantiser steps separate the student from the teacher's code. Axis
+                 spacing is 1/(levels_d // 2) and so differs per axis (0.25 on the
+                 8-level axis, 0.50 on the 5-level axes), which is exactly why this is
+                 counted in index units rather than in distance.
+      within_one every axis index within one step of the teacher's. The forgiving
+                 sibling of masked_acc: `levels: [8,5,5,5]` gives axes with only five
+                 positions, so being one step out is a near miss, and a model improving
+                 from "three steps out" to "one step out" moves this while leaving
+                 accuracy at zero.
+
+    `gap` is read off the logits rather than recomputed, since logits = -d^2/temperature
+    already contains every distance, and a second cdist over 1000 codes is not free.
+    """
+    with torch.no_grad():
+        if not bool(mask.any()):
+            zero = torch.zeros((), device=z.device)
+            return {"gap": zero, "steps_l1": zero, "within_one": zero}
+
+        lg = logits.float()
+        best = lg.max(-1).values                                     # (B, N)
+        true = lg.gather(-1, target_indices.unsqueeze(-1)).squeeze(-1)
+        gap = ((best - true) * temperature)[mask]
+
+        z_norm = normalised_z(z, fsq).float()                        # (B, N, L)
+        c_true = fsq.codebook.to(z_norm.dtype)[target_indices]       # (B, N, L)
+        half = (fsq._levels // 2).to(z_norm.dtype)
+        steps = ((z_norm - c_true) * half).abs()                     # per-axis, index units
+
+        return {
+            "gap": gap.mean(),
+            "steps_l1": steps.sum(-1)[mask].mean(),
+            "within_one": (steps.amax(-1)[mask] <= 1.0).to(torch.float32).mean(),
+        }
+
+
 def codebook_diversity(logits, valid, softmax_scale=1.0, sample_entropy_weight=0.0,
                        eps=1e-8):
     """Entropy penalty on the soft code assignment: (w*E[H(q)] - H(E[q])) / log K.

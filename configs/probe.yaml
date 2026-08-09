@@ -7,6 +7,7 @@
 #   python probe_selfdistill.py source=frozen                     # unadapted control
 #   python probe_selfdistill.py source=adapted ckpt_path=...      # adapted cell
 #   python probe_selfdistill.py source=frozen 'layers=[0,3,7,11]' # depth sweep
+#   python probe_selfdistill.py source=adapted ckpt_path=... seal_test=true
 defaults:
   # Either per-backbone dataset works here: probing never builds a front-end from the
   # dataset config (the encoder applies its own, dispatching on input rank), so this
@@ -23,6 +24,30 @@ defaults:
 # mfcc | frozen | adapted
 source: frozen
 ckpt_path: null
+
+# Leave the test split alone. USE THIS WHILE TUNING, and leave it false only for the
+# final numbers.
+#
+# The reported task protocol fits on train and scores once on the sealed test
+# hydrophones, so it cannot be run repeatedly without turning the test split into a
+# hyperparameter search set: look at it, change the recipe, look again, and the number
+# has stopped being evidence. With seal_test=true the ecotype probe instead runs
+# GroupKFold by hydrophone WITHIN train, and the call-type probe is skipped entirely
+# because its test mask is the sealed split and there is no honest substitute.
+#
+# The nuisance metric is unaffected either way. probe.probe_nuisance_background already
+# masks on tags == "train", so hydrophone decodability from Background clips never
+# touched test at all and is free to look at as often as you like. That matters: it is
+# one of the two co-primary metrics and the only one the pretext diagnostics (token
+# entropy, code usage, cross-entropy) cannot see, since all of those describe the
+# tokenizer and none of them says whether adaptation moved the confound.
+#
+# Metric keys change with the flag, on purpose: a sealed run writes
+# {cell}/task_ecotype_cvtrain and a reported run writes {cell}/task_ecotype, so the two
+# cannot be overlaid in MLflow by accident. The sealed number reads HIGHER than the
+# reported one even with folds grouped by site, because the backbone adapted on every
+# hydrophone in the pool. It is a trend instrument, not a preview of the result.
+seal_test: false
 
 # Which encoder blocks to pool from. null = final output (the headline metric).
 # A list sweeps depth: recording condition is a low-level property, so the confound

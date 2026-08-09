@@ -43,6 +43,7 @@ from models.components.selfdistill_loss import (
     codebook_logits,
     entropy_bits,
     masked_ce,
+    quantisation_gap,
     sample_student_mask,
     saturation_frac,
     valid_token_mask,
@@ -271,6 +272,13 @@ class MIMDistillation(L.LightningModule):
             self.train_code_counts += counts
             used = int((counts > 0).sum())
             acc = (logits.argmax(-1) == target_indices)[student_mask].float().mean()
+            # Temperature-free companions to ce and masked_acc. See quantisation_gap:
+            # train/ce at temperature 0.05 is (1 - masked_acc) times a near-constant
+            # miss cost, so it carries almost no information the accuracy does not,
+            # and its LEVEL cannot be compared against ln(K) at all. These three can.
+            qg = quantisation_gap(
+                z, self.fsq, logits, target_indices, student_mask, self.temperature
+            )
 
         self.log_dict(
             {
@@ -279,6 +287,9 @@ class MIMDistillation(L.LightningModule):
                 "train/vic_var": vic_parts["vic_var"],
                 "train/vic_cov": vic_parts["vic_cov"],
                 "train/masked_acc": acc,
+                "train/q_gap": qg["gap"],
+                "train/q_steps": qg["steps_l1"],
+                "train/q_within_one": qg["within_one"],
                 "train/valid_frac": valid.float().mean(),
                 "train/ema_decay": self._current_decay(),
             },
@@ -356,11 +367,21 @@ class MIMDistillation(L.LightningModule):
         self.val_code_counts += counts
         used = int((counts > 0).sum())
         acc = (logits.argmax(-1) == target_indices)[student_mask].float().mean()
+        qg = quantisation_gap(
+            z, self.fsq, logits, target_indices, student_mask, self.temperature
+        )
         self.log_dict(
             {
                 "val/loss": loss,
                 "val/ce": ce,
                 "val/diversity": div_parts["diversity"],
+                # Temperature-free readout of the same error val/ce measures. val/ce
+                # is still the checkpoint-selection signal, which is sound because it
+                # ranks checkpoints under one fixed temperature; these are what you
+                # read to compare ACROSS configurations. See quantisation_gap.
+                "val/q_gap": qg["gap"],
+                "val/q_steps": qg["steps_l1"],
+                "val/q_within_one": qg["within_one"],
                 # per-batch support, averaged; the pooled epoch figure is val/codebook_frac
                 "val/codebook_frac_batch": used / self.fsq.codebook_size,
                 # NOT a success metric. High masked_acc is a COLLAPSE signature: the

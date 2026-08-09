@@ -377,6 +377,49 @@ class SelfDistillDataModule(LabelDataModule):
         )
         return self._probe_loader(frame, batch_size)
 
+    def train_probe_dataloader(self, max_per_hydro=300, batch_size=32):
+        """ALL labelled TRAIN-hydrophone clips, Background included, capped per site.
+
+        One loader feeding two probes, because both want features on the same population
+        and a second pass over several thousand clips through a ViT-B is the dominant
+        cost of the callback. `TrainCVProbe` extracts features once and then reuses the
+        matrix: the ecotype probe scores every row, which is the four-way problem over
+        `labels` = [Background, HW, SRKW, TKW] that the reported metric also solves, and
+        the nuisance probe scores the Background rows alone.
+
+        TRAIN hydrophones, and this is the point of the whole loader. The reported task
+        number comes from `probe_selfdistill.py`, which fits on train and scores once on
+        the sealed test split, so it cannot be watched during training without spending
+        the test split on hyperparameter search. Cross-validating inside train gives a
+        signal that can be read every validation epoch at no methodological cost, because
+        there is nothing here to burn.
+
+        Low-SR sites are excluded along with test and val, matching the offline probe's
+        pool. They are separable on bandwidth alone, which would inflate the nuisance
+        figure for a reason that has nothing to do with the representation.
+
+        `max_per_hydro` caps each site, stratified by label so each site keeps its class
+        mix. Without it HaroStraitSouth alone would supply a large share of the Background
+        rows, and for the nuisance probe the hydrophone IS the label, so an uncapped pool
+        makes the class balance an artefact of how much each site happened to record.
+        """
+        held = list(self.test_hydros) + list(self.val_hydros) + list(self.low_sr_hydros)
+        frame = self.df.filter(
+            pl.col("Labels").is_in(list(self.labels))
+            & ~pl.col("Dataset").is_in(held)
+        )
+        frame = _cap_per_hydrophone(
+            frame, max_per_hydro,
+            seed=int(self.dataset_configs.get("subsample_seed", 59)),
+            stratify_col="Labels",
+            what="train-CV probe",
+        )
+        log.info(
+            f"train-CV probe: {frame.height} clips over "
+            f"{frame.get_column('Dataset').n_unique()} train hydrophones"
+        )
+        return self._probe_loader(frame, batch_size)
+
     def _probe_loader(self, frame, batch_size):
         """Shared loader construction for the two online probes.
 

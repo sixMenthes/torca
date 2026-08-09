@@ -180,7 +180,7 @@ def encoder_from_checkpoint(ckpt_path, map_location="cpu"):
     return model.student["encoder"].eval()
 
 
-def probe_pool(df, dataset_cfg, include_low_sr=False):
+def probe_pool(df, dataset_cfg, include_low_sr=False, seal_test=False):
     """The rows a probe run extracts features for, and their split tags. One call.
 
     This replaces `labelled_pool` + a separate `split_tags` + a hand-written filter at
@@ -203,6 +203,17 @@ def probe_pool(df, dataset_cfg, include_low_sr=False):
                      cluster inside the tarball. A second definition here would drift.
       * IN-SPLIT   — low_sr dropped unless include_low_sr. See split_tags for why the
                      tag exists and configs/probe.yaml for why it stays off.
+      * SEALED     — test and val rows dropped when seal_test. See below.
+
+    `seal_test` makes the seal STRUCTURAL rather than procedural. Under that flag the
+    probes fit and score on train hydrophones alone, so the held-out rows would have a
+    forward pass spent on them and then be masked away unread — which is exactly the
+    waste this function was written to remove, and worse, it would leave "the test split
+    was not used" resting on every downstream mask being correct. Dropping the rows here
+    means the backbone never sees a test clip at all, and no mask below can undo that.
+
+    On the current manifest the probe pool is 35,169 clips, of which 26,735 are train,
+    so the flag also removes 24% of the extraction cost.
 
     Returns (df, tags) aligned row-for-row.
     """
@@ -217,6 +228,9 @@ def probe_pool(df, dataset_cfg, include_low_sr=False):
     )
     if not include_low_sr:
         keep = tags != "low_sr"
+        pool, tags = pool.filter(pl.Series(keep)), tags[keep]
+    if seal_test:
+        keep = tags == "train"
         pool, tags = pool.filter(pl.Series(keep)), tags[keep]
     return pool, tags
 
