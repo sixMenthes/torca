@@ -201,10 +201,18 @@ class SelfDistillDataModule(LabelDataModule):
             bank = self._ssl_background_bank()
             frontend = self._build_frontend(sr)
 
-            # Asymmetric views: teacher clean, student strong. This asymmetry is what
-            # turns the masked-prediction objective into a denoising / channel-
-            # invariance objective — the cheapest form of the "multiple views"
-            # iBOT/DINO use, no second head or multi-crop yet.
+            # Two views, built independently, so each gets its own AddBackgroundNoise
+            # instance and therefore an INDEPENDENT noise draw. That independence is
+            # what the birdmae_teacherbg arm relies on.
+            #
+            # This block used to claim that the teacher-clean / student-strong asymmetry
+            # "turns the masked-prediction objective into a denoising / channel-
+            # invariance objective". The first adapted run refuted that: a clean teacher
+            # produces channel-specific target codes (val/code_bg_site_mi_excess 0.51
+            # bits on Background clips), so predicting them through foreign noise trains
+            # channel RECOVERY, and nuisance decodability rose from 0.903 to 0.947
+            # instead of falling. See configs/data/transform/ssl_fbank_dclde.yaml, where
+            # the teacher's background block now lives, disabled by default.
             aug_cfg = self.transform_config.get("augmentations", {})
             teacher_aug = self._build_view_aug(aug_cfg.get("teacher", {}), sr, max_length, bank)
             student_aug = self._build_view_aug(aug_cfg.get("student", {}), sr, max_length, bank)

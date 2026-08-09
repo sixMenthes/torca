@@ -39,7 +39,48 @@ target_length: 304
 # Set any op's p to 0.0 to disable it (the datamodule skips those), which makes
 # ablating a single augmentation a one-flag override.
 augmentations:
-  teacher: {}
+  # The teacher view was `{}` — no augmentation at all — until 2026-08-09, on the
+  # reasoning that a clean target is what makes the student's job a denoising task. The
+  # first adapted run measured the cost of that reasoning, and it is the opposite of
+  # what was intended.
+  #
+  # The objective is: teacher tokenises a CLEAN, channel-specific clip into FSQ codes,
+  # student sees the same clip with foreign noise mixed in at 0-15 dB SNR and must
+  # reproduce those exact codes. CodeUsageProbe measured that the codes carry site
+  # information — val/code_bg_site_mi_excess 0.51 bits against a 0.05 null, on
+  # Background clips where the only thing separating sites is the recording chain. So
+  # the cross-entropy is REWARDING the student for recovering which hydrophone a clip
+  # came from despite the interference. That trains channel recovery, not channel
+  # invariance, and robustness to added noise is not the same property as invariance to
+  # the recording chain. Measured outcome: hydrophone decodability from Background clips
+  # went from 0.903 frozen to 0.947 adapted, against a chance of 0.100, with 0.80 of
+  # headroom available in the direction the hypothesis predicted.
+  #
+  # Both views augmented is also what iBOT and DINO actually do; the clean teacher was
+  # the departure.
+  #
+  # p: 0.0 keeps the DEFAULT behaviour byte-identical — _build_view_aug drops any op
+  # with p == 0, so no op is constructed and the background bank is not even read. Turn
+  # it on with the birdmae_teacherbg arm rather than by editing this line, so that the
+  # arms cannot silently disagree about what they trained on.
+  #
+  # BACKGROUND ONLY, deliberately, not the student's full block. Adding shift and gain
+  # here would test invariance to time offset and loudness at the same time, and the
+  # result would no longer be attributable to the channel question. Full symmetry is the
+  # follow-up if this arm works, not the first experiment.
+  #
+  # Expect this arm to show HIGHER ce and LOWER masked_acc, and do not read that as
+  # failure. The two views now carry independent noise draws, so part of the target is
+  # genuinely unpredictable and the cross-entropy has an irreducible floor it did not
+  # have before. That averaging-out of the unpredictable part IS the mechanism by which
+  # invariance is learned. The metric that decides this arm is nuisance decodability,
+  # not the loss. If the target turns out too unpredictable to learn from at all, soften
+  # it by raising min_snr_db for this view rather than by lowering p.
+  teacher:
+    background:
+      p: 0.0
+      min_snr_db: 0.0
+      max_snr_db: 15.0
   student:
     shift:                  # offset jitter, non-cyclic zero-filled
       p: 0.5

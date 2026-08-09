@@ -160,8 +160,30 @@ case "$ARM" in
     NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
     CKPT="$BIRDMAE_CKPT"
     EXTRA=(data.transform.augmentations.student.background.p=0.0) ;;
+  birdmae_teacherbg)
+    # Cross-hydrophone noise on the TEACHER view as well, with an independent draw, so
+    # the target codes are computed on a channel-mixed clip instead of a clean one.
+    #
+    # This is a design change, not a hyperparameter, and it is the direct test of why
+    # C4's nuisance metric went the wrong way. With a clean teacher the target codes
+    # carry site information (val/code_bg_site_mi_excess 0.51 bits against a 0.05 null,
+    # on Background clips), so the cross-entropy pays the student for recovering the
+    # hydrophone through the interference — channel recovery rather than channel
+    # invariance. Mixing noise into the teacher's view removes that reward.
+    #
+    # Background only, not the student's full block: adding shift and gain here would
+    # test three invariances at once and the result would not be attributable.
+    #
+    # Read the NUISANCE metric on this arm, not the loss. Independent noise draws make
+    # part of the target unpredictable, so ce will be higher and masked_acc lower than
+    # C4 by construction, and neither is a failure signal.
+    NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
+    CKPT="$BIRDMAE_CKPT"
+    EXTRA=(data.transform.augmentations.teacher.background.p=0.8) ;;
   *)
-    echo "ERROR: unknown arm '$ARM' (birdmae | beats | birdmae_nobg)" >&2; exit 1 ;;
+    echo "ERROR: unknown arm '$ARM'" >&2
+    echo "       (birdmae | beats | birdmae_nobg | birdmae_teacherbg)" >&2
+    exit 1 ;;
 esac
 
 # Objective variants ride on top of the arm, not instead of it, so that a reweighted

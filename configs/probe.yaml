@@ -100,6 +100,14 @@ seed: 59
 #   C3  adapted BEATs                          selfdistill_beats checkpoint
 #   C4  adapted BirdMAE                        selfdistill_birdmae checkpoint
 #   C5  adapted BirdMAE, background.p=0.0      attribution control
+#   C6  adapted BirdMAE, teacher background    the birdmae_teacherbg arm
+#
+# C5 and C6 pull in opposite directions on the same question and are worth reading as a
+# pair. C5 removes cross-hydrophone noise from the student; C6 adds it to the teacher.
+# If the de-confounding story as originally designed is right, C5 should show a WORSE
+# nuisance figure than C4's 0.947. If the clean teacher was the problem — its target
+# codes carry 0.51 bits of site information, so predicting them rewards channel
+# recovery — then C5 should come in BETTER than C4 and C6 better still.
 #
 # Required for adapted cells and not merely cosmetic: C4 and C5 differ ONLY in the
 # checkpoint, so without it their run names and task_names are identical and the two
