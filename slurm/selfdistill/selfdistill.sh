@@ -169,8 +169,14 @@ DIVERSITY_WEIGHT="${DIVERSITY_WEIGHT:-}"
 # Codebook size, the other lever on how much capacity there is to spend on channel.
 # Empty means the network config's [8, 5, 5, 5], which is K = 1000.
 #
-#   sbatch --export=ALL,LEVELS='[8,6,5]' --account=def-XXXX \
+#   LEVELS='[8,6,5]' sbatch --account=def-XXXX \
 #          slurm/selfdistill/selfdistill.sh birdmae
+#
+# NOTE the form. --export takes a COMMA-SEPARATED list, so --export=ALL,LEVELS='[8,6,5]'
+# is split by sbatch on the commas inside the brackets and the job receives a mangled
+# value. Setting the variable in the submitting shell works instead, because sbatch
+# defaults to --export=ALL and the job inherits the environment. Any lever whose value
+# contains a comma has to be passed this way; the others can use either form.
 #
 # Why this is a lever on the confound. It is NOT an information cap: mutual information
 # between site and code is bounded by log2(K), which is 7.91 bits at K=240, and the
