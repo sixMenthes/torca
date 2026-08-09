@@ -98,7 +98,24 @@ case "$CELL" in
   # results table from the cell it is supposed to be compared against.
   C4|C5|C6) SOURCE="adapted"; NETWORK="mim_distillation"; DATASET="dclde_selfdistill_birdmae"
          BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
-  *) echo "unknown cell '$CELL' (C0 | C1 | C2 | C3 | C4 | C5 | C6)" >&2; exit 1 ;;
+  *)
+    # Any other label is an ADAPTED cell on the arm named by ARM, default birdmae.
+    #
+    # Tuning runs need labels of their own. Reusing C4 for a second adapted checkpoint
+    # would put two different models under the same cell tag writing the same metric
+    # keys, distinguishable only by timestamp, which is exactly the confusion
+    # configs/probe.yaml warns about for C4 against C5. So `probe_sealed.sh T1 <ckpt>`
+    # is allowed and lands under its own label.
+    SOURCE="adapted"
+    case "${ARM:-birdmae}" in
+      birdmae) NETWORK="mim_distillation";       DATASET="dclde_selfdistill_birdmae"
+               BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
+      beats)   NETWORK="mim_distillation_beats"; DATASET="dclde_selfdistill_beats"
+               BACKBONE="$DATA_ROOT/BEATs_iter3.pt" ;;
+      *) echo "unknown ARM '${ARM}' (birdmae | beats)" >&2; exit 1 ;;
+    esac
+    echo "cell '$CELL' is not one of C0-C6; treating it as an adapted ${ARM:-birdmae} cell"
+    ;;
 esac
 if [ "$SOURCE" = "adapted" ] && [ -z "$CKPT_PATH" ]; then
   echo "ERROR: cell $CELL is an adapted cell and needs a checkpoint as the second argument" >&2
