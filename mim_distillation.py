@@ -18,9 +18,12 @@ the docstring used to state it as fact. With an unaugmented teacher the target c
 channel-specific — CodeUsageProbe reads 0.51 bits of site information on Background
 clips against a 0.05 null — so predicting them through foreign noise rewards channel
 RECOVERY instead. Hydrophone decodability rose from 0.902 frozen to 0.947 adapted,
-against a chance of 0.100. Two arms now attack that: birdmae_teacherbg augments the
-teacher's input, and birdmae_sitepca removes the channel subspace from the teacher's
-tokens (see models/components/site_projection.py).
+against a chance of 0.100. The birdmae_teacherbg arm augments the teacher's input to
+test that, and it FAILED: site information in the codes rose to 0.829 bits and the
+nuisance probe climbed across training to 0.915. Across all three runs so far, every
+change that made the pretext task easier also made the codes more channel-informative,
+which suggests recording channel is simply the most reliable shortcut for predicting
+the teacher's codes.
 
 Five non-negotiables from the design, all load-bearing:
  1. EMA covers the WHOLE teacher path (encoder + projector), not the encoder alone —
@@ -46,7 +49,6 @@ from timm.layers import mlp
 from models.components.beats_encoder import BEATsEncoder
 from models.components.birdmae_encoder import BirdMAEEncoder
 from models.components.fsq import FSQ
-from models.components.site_projection import SiteSubspaceProjection
 from models.components.selfdistill_loss import (
     code_counts,
     codebook_diversity,
@@ -147,22 +149,6 @@ class MIMDistillation(L.LightningModule):
         # healthy) and shrinks the gradient 10x. See codebook_diversity's docstring.
         self.diversity_temperature = distill_cfg.get("diversity_temperature", None)
 
-        # Channel-subspace removal on the TEACHER's tokens. Off by default, so the
-        # objective is unchanged until the birdmae_sitepca arm switches it on. The
-        # module's own docstring carries the argument for estimating the subspace
-        # BETWEEN sites rather than within one, and the measured sweep over how many
-        # components have to go before site stops being linearly decodable.
-        sp_cfg = distill_cfg.get("site_projection", None) or {}
-        self.site_projection = None
-        if sp_cfg.get("enabled", False):
-            self.site_projection = SiteSubspaceProjection(
-                dim=self.student["encoder"].embed_dim,
-                n_components=sp_cfg.get("n_components", None),
-                momentum=sp_cfg.get("momentum", 0.05),
-                warmup_steps=sp_cfg.get("warmup_steps", 50),
-                max_sites=sp_cfg.get("max_sites", 64),
-            )
-
         # Epoch-level code-usage histograms. Entropy of pooled counts is not the mean
         # of per-batch entropies, so the headline number has to come from an
         # accumulator rather than from Lightning averaging per-step values.
@@ -204,33 +190,14 @@ class MIMDistillation(L.LightningModule):
         return self._project(self.student, wave, mask=mask)
 
     @torch.no_grad()
-    def teacher_forward(self, wave, sites=None, valid=None):
+    def teacher_forward(self, wave):
         """Clean view through the EMA path -> discrete FSQ indices (the targets).
 
         eval() matters: dropout and stochastic depth active in the teacher would make
         the target stochastic, so the student would chase noise it cannot predict.
-
-        `sites` is the batch's hydrophone names, used only when site_projection is
-        enabled. The channel subspace is then removed from the teacher's 768-dim tokens
-        BEFORE the projector, so the FSQ targets cannot encode recording condition. It
-        has to happen there rather than on z, because z carries only len(levels)
-        dimensions — four — and deleting a channel subspace from a four-dimensional
-        space would take the codebook with it.
-
-        sites=None leaves the targets unprojected, which is the right result for a
-        caller that does not know which hydrophone a clip came from.
         """
         self.teacher.eval()
-        tokens = self.teacher["encoder"].tokens(wave, mask=None)      # (B, N, D)
-        if self.site_projection is not None and sites is not None:
-            idx = self.site_projection.site_indices(sites, tokens.device)
-            if self.training:
-                # Statistics track the LIVE teacher, so they update on the training path
-                # only. Updating them during validation would fold held-out recording
-                # conditions into the basis.
-                self.site_projection.update(tokens, idx, valid=valid)
-            tokens = self.site_projection(tokens)
-        z = self.teacher["projector"](tokens)                         # (B, N, L)
+        z = self._project(self.teacher, wave, mask=None)
         return self.fsq.codes_to_indices(self.fsq.quantize(z)).long()
 
     # ---------------------------------------------------------------- masks
@@ -290,14 +257,7 @@ class MIMDistillation(L.LightningModule):
 
         # Teacher first: it fixes N (BEATs has no static num_patches — the token count
         # follows the waveform) and the targets the student is scored against.
-        # Sites are handed to the teacher so it can strip the channel subspace from
-        # its tokens; without site_projection enabled they are ignored. The validity
-        # mask is not available until num_patches is known, which needs the teacher's
-        # output, so the running means are updated on all positions including padding.
-        # Padding is ~5% of positions and identical across sites, so it shifts every
-        # site mean by the same vector and cancels in the centred matrix.
-        target_indices = self.teacher_forward(teacher_wave,
-                                              sites=batch.get("dataset"))  # (B, N)
+        target_indices = self.teacher_forward(teacher_wave)          # (B, N)
         num_patches = target_indices.shape[1]
 
         valid = self._valid_mask(batch, num_patches, student_wave.device)
@@ -368,19 +328,6 @@ class MIMDistillation(L.LightningModule):
             },
             on_step=True, on_epoch=False, batch_size=student_wave.shape[0],
         )
-        if self.site_projection is not None:
-            # site_energy is the arm's own liveness check. Zero for the whole run means
-            # either the warmup never completed or the between-site directions carry
-            # nothing, and in both cases this is C4 with extra steps rather than a
-            # treatment. site_k should settle at (sites seen) - 1 under the default.
-            self.log_dict(
-                {
-                    "train/site_energy": self.site_projection.last_energy,
-                    "train/site_k": float(self.site_projection.last_k),
-                    "train/site_n": float(self.site_projection.n_sites),
-                },
-                on_step=True, on_epoch=False, batch_size=student_wave.shape[0],
-            )
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -396,9 +343,7 @@ class MIMDistillation(L.LightningModule):
             return None
         student_wave, teacher_wave = batch["student"], batch["teacher"]
 
-        # sites passed so validation targets get the SAME treatment as training ones;
-        # self.training is False here, so the running means are read and not updated.
-        target_indices = self.teacher_forward(teacher_wave, sites=batch.get("dataset"))
+        target_indices = self.teacher_forward(teacher_wave)
         valid = self._valid_mask(batch, target_indices.shape[1], student_wave.device)
 
         gen = torch.Generator(device=student_wave.device)

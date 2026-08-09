@@ -165,35 +165,6 @@ distill:
   # coverage signal. Measured at 1.0 it INVERTS the ordering — a collapsed batch
   # scores better than a healthy one, because collapsed z sits far from most codes
   # and so has a sharper per-token softmax. Only useful in softer regimes.
-  # Strip the recording-channel subspace out of the TEACHER's tokens before they are
-  # quantised, so the FSQ targets cannot encode which hydrophone a clip came from.
-  #
-  # This is aimed at the same failure the birdmae_teacherbg arm is: C4's nuisance metric
-  # rose from 0.902 frozen to 0.947 adapted, and CodeUsageProbe showed the target codes
-  # carrying 0.51 bits of site information, so the cross-entropy was paying the student
-  # to recover the hydrophone through the interference. teacherbg attacks that by making
-  # the teacher's INPUT channel-mixed; this attacks it by removing the channel from the
-  # teacher's REPRESENTATION. They are independent and can be read against each other.
-  #
-  # enabled: false leaves the objective bit-identical to today. Turn it on with the
-  # birdmae_sitepca arm, not by editing this line, so the arms cannot disagree.
-  site_projection:
-    enabled: false
-    # null means S-1, the full rank of the centred per-site mean matrix, which is
-    # equivalent to subtracting each site's mean. NOT a small number: measured on
-    # synthetic tokens with 12 sites, removing 4 of the 11 available directions left
-    # site decodability at 1.000, and only k = S-1 moved it at all. Content survived
-    # the full removal untouched. The sweep is in the module docstring.
-    n_components: null
-    # EMA rate on the running per-site means. They have to track the encoder, which
-    # moves throughout training, rather than be estimated once at the start.
-    momentum: 0.05
-    # Projection stays OFF until every site seen has contributed this many batches.
-    # Projecting on noisy means would corrupt the targets exactly while the codebook is
-    # forming, which is epochs 1 and 2 — the codebook reaches its final entropy by
-    # epoch 2, so there is no room to recover from a bad start there.
-    warmup_steps: 50
-    max_sites: 64
   diversity_sample_weight: 0.0
   # null = score coverage at the CE temperature. Counterintuitive but measured: at
   # 0.05 the ordering across healthy/16/4/1-code cases is monotonic with 0.60 of

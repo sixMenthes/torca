@@ -360,12 +360,7 @@ class CodeUsageProbe(Callback):
             if batch is None:
                 continue
             wave = batch["wave"].to(pl_module.device)
-            # sites passed so this histogram describes the codes the model is ACTUALLY
-            # trained against. With site_projection enabled the training targets are
-            # channel-stripped, and tokenising without sites here would measure a
-            # different tokenizer from the one the cross-entropy uses — which would make
-            # val/code_bg_site_mi_excess, the metric this arm is aimed at, meaningless.
-            idx = pl_module.teacher_forward(wave, sites=batch["dataset"])   # (B, N)
+            idx = pl_module.teacher_forward(wave)          # (B, N)
 
             # Padding tokenises to a constant silence code, so it must be excluded or it
             # dominates the histogram — and it would dominate the two subsets UNEQUALLY

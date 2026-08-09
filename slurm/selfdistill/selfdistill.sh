@@ -222,27 +222,9 @@ case "$ARM" in
     NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
     CKPT="$BIRDMAE_CKPT"
     EXTRA=(data.transform.augmentations.teacher.background.p=0.8) ;;
-  birdmae_sitepca)
-    # The other attack on the same failure. Instead of mixing noise into the teacher's
-    # INPUT, remove the recording-channel subspace from the teacher's REPRESENTATION:
-    # the between-site directions are estimated from running per-site mean tokens and
-    # projected out of the 768-dim tokens before the projector, so the FSQ targets
-    # cannot encode hydrophone identity.
-    #
-    # Independent of birdmae_teacherbg, so the two are readable against each other. This
-    # one is the more surgical of the pair — it removes site and nothing else, where
-    # background mixing also perturbs content — and the more likely to be inert, since
-    # it can only remove what the per-site means actually capture.
-    #
-    # Watch train/site_energy. Zero for the whole run means the warmup never finished or
-    # the between-site directions carry nothing, and either way the run is C4 with extra
-    # steps rather than a treatment.
-    NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
-    CKPT="$BIRDMAE_CKPT"
-    EXTRA=(module.network.distill.site_projection.enabled=true) ;;
   *)
     echo "ERROR: unknown arm '$ARM'" >&2
-    echo "       (birdmae | beats | birdmae_nobg | birdmae_teacherbg | birdmae_sitepca)" >&2
+    echo "       (birdmae | beats | birdmae_nobg | birdmae_teacherbg)" >&2
     exit 1 ;;
 esac
 
