@@ -181,6 +181,21 @@ class SelfDistillDataModule(LabelDataModule):
         transform's sample_rate come from different config files, and a BEATs
         front-end fed 32 kHz audio would produce a perfectly valid-looking
         spectrogram that is simply wrong. Fail loudly instead.
+
+        mean and std are PASSED, not left to the front-end class defaults, and that is
+        the whole point of this function's signature. Until 2026-08-10 they were not,
+        so every self-distillation run standardised with KaldiFbank's hard-coded
+        -45.198 / 14.855 no matter what the dataset config said, while the OFFLINE probe
+        took a different route — it hands raw waveforms to the encoder, and
+        BirdMAEEncoder runs its own front-end built from `encoder.fbank_mean`, which
+        does interpolate the dataset value. Training and probing therefore standardised
+        the same audio differently, by roughly four standard units, and every Bird-MAE
+        checkpoint from before this date is affected. Nothing errored, because both
+        halves were individually valid.
+
+        Reading them from the DATASET config is what makes the two paths agree by
+        construction: `module/network/*.yaml` interpolates `encoder.fbank_mean` from the
+        same field, so there is one number and both front-ends read it.
         """
         name = self.dataset_configs.get("model_name", None)
         if not name:
@@ -191,7 +206,13 @@ class SelfDistillDataModule(LabelDataModule):
                 f"dataset model_name={name} expects {expected} Hz but the transform "
                 f"gives {sr} Hz — the dataset yaml and module/network disagree"
             )
-        return make_frontend(name, sample_rate=sr,
+        mean = float(self.dataset_configs.mean)
+        std = float(self.dataset_configs.std)
+        # Logged because the failure this replaces was silent, and a wrong scaling looks
+        # exactly like a healthy run until the probes disagree with the training curves.
+        log.info(f"fbank front-end: {name} @ {sr} Hz, standardising with "
+                 f"mean={mean}, std={std} (from the dataset config)")
+        return make_frontend(name, sample_rate=sr, mean=mean, std=std,
                              target_length=int(self.transform_config.target_length))
 
     def setup(self, stage: str):

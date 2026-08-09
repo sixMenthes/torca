@@ -57,7 +57,18 @@ num_calls: 21
 
 class_to_balance: {}
 
-mean: -45.198
-std: 14.855
+# BEATs' OWN normalisation constants, which ship with the checkpoint and are what
+# `BEATs.preprocess` applies. They are on a completely different scale from Bird-MAE's
+# because BEATs multiplies the waveform by 2**15 before the fbank and does not
+# mean-subtract it, so its log-mel energies are large and positive.
+#
+# These replace -45.198 / 14.855, which were this project's own statistics MEASURED
+# THROUGH THE BIRD-MAE FRONT-END and were never meaningful here. They were harmless only
+# for as long as nothing read them: until 2026-08-10 the datamodule built the front-end
+# without passing mean or std, so BEATsFbank fell back to these same correct defaults.
+# Now that the dataset config is the single source of truth for both front-ends, a wrong
+# value here would be applied rather than ignored.
+mean: 15.41663
+std: 6.55582
 clip_duration: 3.0
 target_length: ${data.transform.target_length}

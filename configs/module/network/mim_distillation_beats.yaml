@@ -11,9 +11,14 @@ encoder:
   # SSL, and the AS20K-finetuned variant would smuggle supervised AudioSet labels in
   # as a confound.
   pretrained_weights_path: /home/tundra/projects/torca/pretrained/BEATs_iter3.pt
-  # BEATs' own fbank normalisation, not DCLDE's — it ships with the checkpoint.
-  fbank_mean: 15.41663
-  fbank_std: 6.55582
+  # BEATs' own fbank normalisation (15.41663 / 6.55582), not DCLDE's — it ships with the
+  # checkpoint. INTERPOLATED rather than written out, so that this encoder-side front-end
+  # and the dataset-side one cannot drift apart: the dataset builds the fbank during
+  # training, and this one runs during offline probing, when the encoder is handed raw
+  # waveforms instead. Two literals in two files is exactly how they came to disagree on
+  # the Bird-MAE arm.
+  fbank_mean: ${data.dataset.mean}
+  fbank_std: ${data.dataset.std}
 
 tokenizer:
   # MUST match mim_distillation.yaml — see there for why [8,5,5,5]. Identical on both
@@ -23,6 +28,18 @@ tokenizer:
 
 distill:
   mask_ratio: 0.6
+  # These four MUST match mim_distillation.yaml, which carries the full rationale for
+  # each of them; only the defaults are repeated here.
+  #
+  # They have to be PRESENT even when unused, because selfdistill.sh passes
+  # MASK_STRATEGY as a plain Hydra override, and a plain override of a key the config
+  # does not define fails at composition time. Before this block existed, any BEATs run
+  # of the band-masking recipe died before the first step while the Bird-MAE run of the
+  # same recipe succeeded, which is the worst possible way for two arms to disagree.
+  mask_strategy: random
+  max_time_band_frac: 0.25
+  max_freq_band_frac: 0.375
+  p_freq_band: 0.5
   temperature: 0.05
   ema_decay: 0.996
   ema_decay_end: 0.9999
@@ -45,5 +62,10 @@ distill:
   # what makes adaptation a homogeneous treatment. If BEATs turns out to need a
   # different weight, that is a finding to report, not a knob to retune per arm.
   diversity_weight: 1.0
+  # Present for the same reason as the masking keys above: DIVERSITY_FLOOR is passed as
+  # a plain override and would fail composition if the key were absent. null keeps the
+  # constant-pull entropy penalty; see mim_distillation.yaml for why the hinge is a
+  # different objective rather than a different strength of the same one.
+  diversity_floor: null
   diversity_sample_weight: 0.0
   diversity_temperature: null
