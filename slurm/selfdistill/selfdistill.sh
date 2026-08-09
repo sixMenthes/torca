@@ -297,6 +297,13 @@ if [ -n "$DIVERSITY_WEIGHT" ]; then
   VARIANT="_div${DIVERSITY_WEIGHT}"
 fi
 
+# MAX_EPOCHS has a default rather than being empty, so it is compared against that
+# default rather than against "". Without this, two runs differing only in length
+# would share a task_name and land in the same output tree.
+if [ "$MAX_EPOCHS" != "18" ]; then
+  VARIANT="${VARIANT}_e${MAX_EPOCHS}"
+fi
+
 if [ -n "$SEED" ]; then
   EXTRA+=("seed=$SEED")
   VARIANT="${VARIANT}_s${SEED}"
