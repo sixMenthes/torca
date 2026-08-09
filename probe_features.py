@@ -167,6 +167,50 @@ def _stack(X, labels, calls, datasets):
     }
 
 
+def _allow_omegaconf_globals():
+    """Let torch.load unpickle the OmegaConf objects a Lightning checkpoint carries.
+
+    PyTorch 2.6 changed the default of `torch.load(weights_only=...)` from False to
+    True, and a weights-only load refuses any global that is not on an allowlist. Our
+    checkpoints fail that check, because `save_hyperparameters` stored the Hydra config
+    and so `hyper_parameters` holds real omegaconf objects — `levels: [8, 5, 5, 5]` is a
+    ListConfig, not a list. The failure surfaces as UnpicklingError naming one class at a
+    time, which is why the whole set is allowlisted here rather than the first one that
+    happened to be reported.
+
+    Safe in this specific sense: the restriction exists to stop a hostile checkpoint from
+    executing arbitrary code during unpickling, and these are checkpoints this project
+    wrote itself on its own cluster. It is not a blanket allowlist either — omegaconf's
+    container and node types are data holders.
+
+    Silently does nothing on torch older than 2.6, where the function does not exist and
+    the restriction does not either.
+    """
+    add = getattr(torch.serialization, "add_safe_globals", None)
+    if add is None:
+        return
+    import collections
+    import importlib
+    import typing
+
+    # Resolved by name and individually, because omegaconf has moved these between
+    # modules across its 2.x line and an ImportError here would take down a probe run
+    # over a best-effort allowlist. Anything that cannot be found is skipped; the
+    # weights_only=False path in the caller is what actually has to work.
+    allow = [typing.Any, collections.defaultdict, dict, list, int, float, str, bool]
+    for module_name, attrs in (
+        ("omegaconf", ("DictConfig", "ListConfig")),
+        ("omegaconf.base", ("ContainerMetadata", "Metadata")),
+        ("omegaconf.nodes", ("AnyNode", "ValueNode")),
+    ):
+        try:
+            mod = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        allow += [getattr(mod, a) for a in attrs if hasattr(mod, a)]
+    add(allow)
+
+
 def encoder_from_checkpoint(ckpt_path, map_location="cpu"):
     """Student encoder out of a MIMDistillation checkpoint (the ADAPTED cell).
 
@@ -174,9 +218,30 @@ def encoder_from_checkpoint(ckpt_path, map_location="cpu"):
     generation. Reporting the teacher would measure a lagged average of the thing you
     actually trained.
     """
+    import inspect
+
     from mim_distillation import MIMDistillation
 
-    model = MIMDistillation.load_from_checkpoint(ckpt_path, map_location=map_location)
+    _allow_omegaconf_globals()
+
+    # Belt and braces on the allowlist above, which has to enumerate classes and so can
+    # always miss one. Newer Lightning forwards `weights_only` to torch.load, which
+    # settles the question outright. The signature is INSPECTED rather than the call
+    # being wrapped in try/except, because load_from_checkpoint forwards unrecognised
+    # keyword arguments to the LightningModule constructor — on a version without the
+    # parameter, passing it would not raise TypeError here but would arrive at
+    # MIMDistillation.__init__ as a bogus hyperparameter.
+    kwargs = {}
+    try:
+        params = inspect.signature(MIMDistillation.load_from_checkpoint).parameters
+        if "weights_only" in params:
+            kwargs["weights_only"] = False
+    except (TypeError, ValueError):
+        pass
+
+    model = MIMDistillation.load_from_checkpoint(
+        ckpt_path, map_location=map_location, **kwargs
+    )
     return model.student["encoder"].eval()
 
 
