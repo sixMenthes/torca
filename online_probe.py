@@ -280,29 +280,124 @@ def _entropy_bits(counts):
     return float(-(p * np.log2(p)).sum())
 
 
-def _site_code_mi(by_site):
-    """Mutual information in bits between hydrophone and code, I(S;C) = H(C) - H(C|S).
+def _group_code_mi(by_group):
+    """Mutual information in bits between a grouping variable and the code, I(G;C).
 
-    The tokenizer-level version of the nuisance question. If the codes carry nothing
-    about which site a Background clip came from, this is zero; if the tokenizer is
-    spending codes on recording condition, it is not. Unlike a linear probe it needs no
-    fitting, no hyperparameter and no cross-validation — it is a property of the two
-    histograms.
+    I(G;C) = H(C) - H(C|G), computed from histograms alone. Unlike a linear probe it
+    needs no fitting, no hyperparameter and no cross-validation, so it is cheap enough
+    to run every validation epoch.
 
-    by_site: dict of hydrophone -> (K,) count array.
+    Two groupings are used. With G = hydrophone on Background clips this is the
+    tokenizer-level nuisance measurement, and zero means the codes say nothing about
+    which site a noise clip came from. With G = ecotype on vocalisation clips it is the
+    tokenizer-level TASK measurement, and it is the thing the entropy diagnostics
+    structurally cannot see: token_bits_frac only says how evenly the codebook is used,
+    and an arbitrary partition of the feature space maximises that just as well as a
+    meaningful one does.
+
+    by_group: dict of group label -> (K,) count array.
     """
-    sites = [s for s, c in by_site.items() if np.asarray(c).sum() > 0]
-    if len(sites) < 2:
+    groups = [g for g, c in by_group.items() if np.asarray(c).sum() > 0]
+    if len(groups) < 2:
         return None
-    totals = np.array([np.asarray(by_site[s]).sum() for s in sites], dtype=np.float64)
-    pooled = np.sum([np.asarray(by_site[s]) for s in sites], axis=0)
+    totals = np.array([np.asarray(by_group[g]).sum() for g in groups], dtype=np.float64)
+    pooled = np.sum([np.asarray(by_group[g]) for g in groups], axis=0)
     h_c = _entropy_bits(pooled)
-    # H(C|S) = sum_s p(s) H(C | S=s), weighted by each site's share of the tokens.
-    h_c_given_s = sum(
-        (totals[i] / totals.sum()) * _entropy_bits(by_site[s])
-        for i, s in enumerate(sites)
+    # H(C|G) = sum_g p(g) H(C | G=g), weighted by each group's share of the tokens.
+    h_c_given_g = sum(
+        (totals[i] / totals.sum()) * _entropy_bits(by_group[g])
+        for i, g in enumerate(groups)
     )
-    return h_c - h_c_given_s
+    return h_c - h_c_given_g
+
+
+def _group_entropy_bits(by_group):
+    """H(G), the entropy of the grouping variable itself, weighted by token share.
+
+    Reported so the mutual information can be read as a FRACTION of what is available.
+    I(G;C) is bounded above by H(G), and H(G) differs a lot between the two groupings
+    here: twelve hydrophones give up to log2(12) = 3.58 bits, three ecotypes give up to
+    log2(3) = 1.58. Comparing the raw bits of one against the other would be comparing
+    quantities with different ceilings.
+    """
+    totals = np.array([np.asarray(c).sum() for c in by_group.values()], dtype=np.float64)
+    totals = totals[totals > 0]
+    if totals.size < 2:
+        return None
+    p = totals / totals.sum()
+    return float(-(p * np.log2(p)).sum())
+
+
+def _by_group(per_clip, key, K, order=None):
+    """Sum per-clip histograms into a dict keyed by field `key` of each record.
+
+    `order` overrides which label each clip contributes under, which is how the
+    shuffled null is built: same histograms, same sample sizes, group assignment
+    destroyed.
+    """
+    out = {}
+    for i, rec in enumerate(per_clip):
+        g = rec[key] if order is None else per_clip[order[i]][key]
+        out[g] = out.get(g, np.zeros(K, dtype=np.int64)) + rec[2]
+    return out
+
+
+def _mi_with_null(per_clip, key, K, rng):
+    """(mi, shuffled_null, excess, H(G)) for one grouping, or None.
+
+    A plug-in mutual information from histograms is biased UPWARD when the sample is
+    small relative to K, and K is 1000 here, so the raw number is not readable on its
+    own. The null recomputes the identical estimator with the group labels permuted
+    ACROSS CLIPS, which is the level finite sampling alone produces, and the excess is
+    the number to read. Shuffling at clip level rather than token level is deliberate:
+    tokens within a clip are not independent, so a token-level shuffle would understate
+    the null and inflate the excess.
+    """
+    groups = _by_group(per_clip, key, K)
+    mi = _group_code_mi(groups)
+    if mi is None:
+        return None
+    null = _group_code_mi(_by_group(per_clip, key, K, order=rng.permutation(len(per_clip))))
+    if null is None:
+        return None
+    return mi, null, mi - null, _group_entropy_bits(groups)
+
+
+def _conditional_mi_with_null(per_clip, key, cond_key, K, rng, min_clips=30):
+    """I(G;C | cond), averaged over the conditioning variable, with a within-cell null.
+
+    This exists because ecotype and hydrophone are correlated in this dataset, so a
+    pooled I(ecotype;C) can be high for the wrong reason: the codes encode site, and
+    site predicts ecotype. Conditioning on hydrophone holds the recording chain fixed,
+    which is the same trick the online ecotype probe uses when it restricts itself to a
+    single site.
+
+    The null is permuted WITHIN each conditioning cell, not across the whole set, so it
+    is the right null for the conditional quantity. Cells with fewer than `min_clips`
+    clips or fewer than two groups are skipped, because a plug-in estimate over 1000
+    bins from a handful of clips is almost entirely bias.
+    """
+    cells = {}
+    for rec in per_clip:
+        cells.setdefault(rec[cond_key], []).append(rec)
+
+    num, num_null, weight = 0.0, 0.0, 0.0
+    used = 0
+    for recs in cells.values():
+        if len(recs) < min_clips or len({r[key] for r in recs}) < 2:
+            continue
+        mi = _group_code_mi(_by_group(recs, key, K))
+        null = _group_code_mi(_by_group(recs, key, K, order=rng.permutation(len(recs))))
+        if mi is None or null is None:
+            continue
+        w = float(sum(r[2].sum() for r in recs))
+        num += w * mi
+        num_null += w * null
+        weight += w
+        used += 1
+    if weight <= 0 or used < 2:
+        return None
+    return num / weight, num_null / weight, (num - num_null) / weight, used
 
 
 class CodeUsageProbe(Callback):
@@ -332,6 +427,29 @@ class CodeUsageProbe(Callback):
     deliberate: tokens within a clip are not independent, so a token-level shuffle would
     understate the null.
 
+    The same estimator is then applied to the VOCALISATION subset with ecotype as the
+    grouping, giving `val/code_eco_mi_excess`. That is the measurement this callback was
+    missing, and it is the one the entropy diagnostics structurally cannot provide.
+    `token_bits_frac` says only how evenly the codebook is used, and an arbitrary
+    partition of the feature space maximises that exactly as well as a meaningful one
+    does, so nothing logged before this said whether the codes carry ecotype at all. Up
+    is good here, where down is good for the site figure, and the pair is the
+    tokenizer-level counterpart of the study's two co-primary linear probes.
+
+    Read `val/code_eco_mi_cond_excess` in preference when the two disagree. Ecotype and
+    hydrophone are correlated in this dataset, so the pooled figure can be high for the
+    wrong reason: the codes encode site, and site predicts ecotype. The conditional
+    version averages the mutual information computed WITHIN each hydrophone, holding the
+    recording chain fixed, which is the same reasoning that pins the online ecotype probe
+    to a single site.
+
+    Verified on synthetic per-clip histograms with 1000 codes, 12 sites and 3 ecotypes,
+    in scratch/test_eco_mi.py. Codes driven by ecotype gave a pooled excess of 1.204 and
+    a conditional excess of 0.514; codes driven by SITE ALONE, with site correlated to
+    ecotype, gave a spurious pooled excess of 0.337 and a conditional excess of 0.000;
+    codes driven by nothing gave 0.000 for both. The middle row is why the conditional
+    variant exists.
+
     NOT a replacement for the reported nuisance metric. That one asks whether a linear
     probe can recover the site from the ENCODER's features; this asks what the
     TOKENIZER's codes reveal. A tokenizer that ignores site does not guarantee an
@@ -347,12 +465,17 @@ class CodeUsageProbe(Callback):
 
     @torch.no_grad()
     def _tokenise(self, pl_module, loader, max_batches=None):
-        """(pooled counts, {site: counts}) over a loader, padding excluded."""
+        """(pooled counts, per-clip records) over a loader, padding excluded.
+
+        Each record is (site, label, counts). The label rides along so the SAME pass
+        supports both groupings, since tokenising the vocalisation subset twice would
+        double the callback's cost for no reason.
+        """
         from models.components.selfdistill_loss import code_counts, valid_token_mask
 
         K = pl_module.fsq.codebook_size
         pooled = np.zeros(K, dtype=np.int64)
-        by_site, per_clip = {}, []
+        per_clip = []
 
         for i, batch in enumerate(loader):
             if max_batches is not None and i >= max_batches:
@@ -377,12 +500,12 @@ class CodeUsageProbe(Callback):
                 valid = torch.ones_like(idx, dtype=torch.bool)
 
             pooled += code_counts(idx, valid, K).cpu().numpy()
-            # Per-clip counts, kept so the site labels can be shuffled at CLIP level.
+            # Per-clip counts, kept so group labels can be shuffled at CLIP level.
+            labels = batch["label"].tolist()
             for b, site in enumerate(batch["dataset"]):
                 c = code_counts(idx[b:b + 1], valid[b:b + 1], K).cpu().numpy()
-                per_clip.append((site, c))
-                by_site[site] = by_site.get(site, np.zeros(K, dtype=np.int64)) + c
-        return pooled, by_site, per_clip
+                per_clip.append((site, labels[b], c))
+        return pooled, per_clip
 
     @torch.no_grad()
     def on_validation_epoch_end(self, trainer, pl_module):
@@ -396,7 +519,8 @@ class CodeUsageProbe(Callback):
 
         K = pl_module.fsq.codebook_size
         ceiling = np.log2(K)
-        metrics, bg_per_clip = {}, None
+        metrics = {}
+        rng = np.random.default_rng(self.seed + trainer.current_epoch)
 
         # See OnlineProbe: fast_dev_run does not reach a callback's own dataloader, and
         # this one iterates 4,243 clips across its two subsets. On the preflight's CPU
@@ -405,13 +529,17 @@ class CodeUsageProbe(Callback):
         # anyway, since the model has taken one step.
         max_batches = 2 if trainer.fast_dev_run else None
 
+        # Record index of each field in a per-clip record, named so the grouping calls
+        # below read as what they are rather than as bare integers.
+        SITE, LABEL = 0, 1
+
         try:
             for tag, background in (("bg", True), ("call", False)):
                 loader = dm.code_usage_dataloader(
                     background, max_per_hydro=self.max_per_hydro,
                     batch_size=self.batch_size,
                 )
-                pooled, by_site, per_clip = self._tokenise(
+                pooled, per_clip = self._tokenise(
                     pl_module, loader, max_batches=max_batches
                 )
                 if pooled.sum() == 0:
@@ -420,29 +548,58 @@ class CodeUsageProbe(Callback):
                 metrics[f"val/code_{tag}_token_bits"] = bits
                 metrics[f"val/code_{tag}_token_bits_frac"] = bits / ceiling
                 metrics[f"val/code_{tag}_codes_used"] = float((pooled > 0).sum())
-                if background:
-                    bg_per_clip = per_clip
-                    mi = _site_code_mi(by_site)
-                    if mi is not None:
-                        metrics["val/code_bg_site_mi"] = mi
-                        metrics["val/code_bg_n_sites"] = float(len(by_site))
 
-            # The null: same estimator, same sample size, site labels destroyed. Any MI
-            # below this is finite-sample bias rather than structure.
-            if bg_per_clip and "val/code_bg_site_mi" in metrics:
-                rng = np.random.default_rng(self.seed + trainer.current_epoch)
-                sites = [s for s, _ in bg_per_clip]
-                perm = rng.permutation(len(sites))
-                shuffled = {}
-                for i, (_, c) in enumerate(bg_per_clip):
-                    s = sites[perm[i]]
-                    shuffled[s] = shuffled.get(s, np.zeros(K, dtype=np.int64)) + c
-                null = _site_code_mi(shuffled)
-                if null is not None:
-                    metrics["val/code_bg_site_mi_shuffled"] = null
-                    metrics["val/code_bg_site_mi_excess"] = (
-                        metrics["val/code_bg_site_mi"] - null
-                    )
+                if background:
+                    # NUISANCE side: how much do the codes say about the recording
+                    # chain, measured where content is absent so the answer is about
+                    # channel rather than about what was vocalising. Down is good.
+                    got = _mi_with_null(per_clip, SITE, K, rng)
+                    if got is not None:
+                        mi, null, excess, h_g = got
+                        metrics["val/code_bg_site_mi"] = mi
+                        metrics["val/code_bg_site_mi_shuffled"] = null
+                        metrics["val/code_bg_site_mi_excess"] = excess
+                        metrics["val/code_bg_n_sites"] = float(
+                            len({r[SITE] for r in per_clip})
+                        )
+                        if h_g:
+                            metrics["val/code_bg_site_mi_frac"] = excess / h_g
+                else:
+                    # TASK side, and the one this callback was missing. Entropy says
+                    # only how evenly the codebook is used, and an arbitrary partition
+                    # of the feature space maximises that as well as a meaningful one
+                    # does, so nothing logged before this told us whether the codes
+                    # carry ecotype at all. Up is good, and it is the tokenizer-level
+                    # counterpart of the linear probes.
+                    got = _mi_with_null(per_clip, LABEL, K, rng)
+                    if got is not None:
+                        mi, null, excess, h_g = got
+                        metrics["val/code_eco_mi"] = mi
+                        metrics["val/code_eco_mi_shuffled"] = null
+                        metrics["val/code_eco_mi_excess"] = excess
+                        metrics["val/code_eco_n_classes"] = float(
+                            len({r[LABEL] for r in per_clip})
+                        )
+                        # As a fraction of H(ecotype), because the two mutual
+                        # informations have different ceilings: twelve hydrophones
+                        # offer up to log2(12) = 3.58 bits and three ecotypes up to
+                        # log2(3) = 1.58, so raw bits are not comparable between them.
+                        if h_g:
+                            metrics["val/code_eco_mi_frac"] = excess / h_g
+
+                    # Ecotype correlates with hydrophone in this dataset, so the pooled
+                    # figure above can be high because the codes encode SITE and site
+                    # predicts ecotype. Conditioning on hydrophone holds the recording
+                    # chain fixed, which is the same reasoning that pins the online
+                    # ecotype probe to a single site. This is the channel-free version
+                    # and it is the one to trust when the two disagree.
+                    got = _conditional_mi_with_null(per_clip, LABEL, SITE, K, rng)
+                    if got is not None:
+                        mi, null, excess, used = got
+                        metrics["val/code_eco_mi_cond"] = mi
+                        metrics["val/code_eco_mi_cond_shuffled"] = null
+                        metrics["val/code_eco_mi_cond_excess"] = excess
+                        metrics["val/code_eco_mi_cond_sites"] = float(used)
         except Exception as e:                       # never let monitoring kill a run
             log.warning(f"code-usage probe failed: {e}")
             return
