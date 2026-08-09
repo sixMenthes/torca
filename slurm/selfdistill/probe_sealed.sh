@@ -62,8 +62,8 @@
 
 set -euo pipefail
 
-CELL="${1:?usage: sbatch probe_sealed.sh <cell> <ckpt>   e.g. C4 /path/to/last.ckpt}"
-CKPT_PATH="${2:?usage: sbatch probe_sealed.sh <cell> <ckpt>}"
+CELL="${1:?usage: sbatch probe_sealed.sh <cell> [ckpt]   e.g. C2, or C4 /path/last.ckpt}"
+CKPT_PATH="${2:-}"
 
 # ============================== USER SETTINGS ==============================
 PROJECT_ROOT="${PROJECT_ROOT:-$HOME/projects/def-XXXX/$USER/torca}"
@@ -72,15 +72,33 @@ DATA_ROOT="${DATA_ROOT:-$HOME/projects/def-XXXX/$USER}"
 OUTPUT_DIR="${OUTPUT_DIR:-$DATA_ROOT}"
 TARBALL="${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}"
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
-# The backbone the checkpoint was adapted FROM. C3 is BEATs; C4 and C5 are Bird-MAE.
+# The CONTROL cells matter as much as the adapted ones here, and more than they did
+# before. An adapted cell's sealed numbers are meaningless on their own: the sealed task
+# metric is GroupKFold within train, which is a different estimator from the reported
+# fit-on-train/score-on-test figure, so comparing an adapted sealed number against a
+# frozen REPORTED number measures the change of estimator rather than the effect of
+# adaptation. Every adapted cell needs its frozen counterpart run through this same
+# script before either number means anything.
+#
+# C0 needs no encoder at all and C1/C2 need no checkpoint, so the second argument is
+# required only for C3/C4/C5.
 case "$CELL" in
-  C3)        NETWORK="mim_distillation_beats"; DATASET="dclde_selfdistill_beats"
-             BACKBONE="$DATA_ROOT/BEATs_iter3.pt" ;;
-  C4|C5)     NETWORK="mim_distillation";       DATASET="dclde_selfdistill_birdmae"
-             BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
-  *) echo "unknown cell '$CELL' — this script only handles the ADAPTED cells C3/C4/C5" >&2
-     exit 1 ;;
+  C0)    SOURCE="mfcc";    NETWORK="mim_distillation"; DATASET="dclde_selfdistill_birdmae"
+         BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
+  C1)    SOURCE="frozen";  NETWORK="mim_distillation_beats"; DATASET="dclde_selfdistill_beats"
+         BACKBONE="$DATA_ROOT/BEATs_iter3.pt" ;;
+  C2)    SOURCE="frozen";  NETWORK="mim_distillation"; DATASET="dclde_selfdistill_birdmae"
+         BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
+  C3)    SOURCE="adapted"; NETWORK="mim_distillation_beats"; DATASET="dclde_selfdistill_beats"
+         BACKBONE="$DATA_ROOT/BEATs_iter3.pt" ;;
+  C4|C5) SOURCE="adapted"; NETWORK="mim_distillation"; DATASET="dclde_selfdistill_birdmae"
+         BACKBONE="$DATA_ROOT/Bird-MAE-B" ;;
+  *) echo "unknown cell '$CELL' (C0 | C1 | C2 | C3 | C4 | C5)" >&2; exit 1 ;;
 esac
+if [ "$SOURCE" = "adapted" ] && [ -z "$CKPT_PATH" ]; then
+  echo "ERROR: cell $CELL is an adapted cell and needs a checkpoint as the second argument" >&2
+  exit 1
+fi
 # ==========================================================================
 
 module load StdEnv/2023 python/3.11 gcc arrow/22.0.0
@@ -95,9 +113,11 @@ export CODECARBON_LOG_LEVEL=error
 cd "$PROJECT_ROOT"
 mkdir -p logs/slurm
 
-[ -f "$CKPT_PATH" ] || { echo "ERROR: checkpoint not found: $CKPT_PATH" >&2; exit 1; }
-[ -e "$BACKBONE" ]  || { echo "ERROR: backbone not found: $BACKBONE" >&2; exit 1; }
-[ -f "$TARBALL" ]   || { echo "ERROR: tarball not found: $TARBALL" >&2; exit 1; }
+if [ -n "$CKPT_PATH" ]; then
+  [ -f "$CKPT_PATH" ] || { echo "ERROR: checkpoint not found: $CKPT_PATH" >&2; exit 1; }
+fi
+[ -e "$BACKBONE" ] || { echo "ERROR: backbone not found: $BACKBONE" >&2; exit 1; }
+[ -f "$TARBALL" ]  || { echo "ERROR: tarball not found: $TARBALL" >&2; exit 1; }
 
 # --- stage data to node-local NVMe ---------------------------------------
 DATA_DIR="$SLURM_TMPDIR/data"
@@ -117,13 +137,18 @@ echo "Staged $NCLIPS wav files to $DATA_DIR"
 # paths=cluster hydra=cluster are NOT optional: probe.yaml defaults to the workstation
 # variants of both, and without these the results land under $PROJECT_ROOT/mlruns
 # instead of $OUTPUT_DIR/mlruns, which is not what gets copied back.
+CKPT_OVERRIDE=()
+if [ -n "$CKPT_PATH" ]; then
+  CKPT_OVERRIDE=("ckpt_path=$CKPT_PATH")
+fi
+
 srun python probe_selfdistill.py \
     paths=cluster \
     hydra=cluster \
-    source=adapted \
+    source="$SOURCE" \
     seal_test=true \
     cell="$CELL" \
-    ckpt_path="$CKPT_PATH" \
+    "${CKPT_OVERRIDE[@]}" \
     module/network="$NETWORK" \
     data/dataset="$DATASET" \
     paths.dataset_dir="$DATA_DIR" \

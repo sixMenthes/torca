@@ -276,6 +276,14 @@ def run(cfg: DictConfig):
             metrics = {
                 f"{name}/{task_key}": task["balanced_acc"],
                 f"{name}/{task_key}_chance": task["majority_baseline"],
+                # Sealed only, and not decoration. Ecotype support is wildly uneven
+                # across the train sites — SwanChan holds 1304 of the 1608 HW clips —
+                # so a GroupKFold fold that holds SwanChan out trains on almost no HW
+                # and tests on almost nothing else. sklearn says as much, via
+                # "y_pred contains classes not in y_true". The headline mean can move
+                # several points on which sites landed together, so the spread has to
+                # be visible next to it or the number reads far more precise than it is.
+                **({f"{name}/{task_key}_std": task["std"]} if "std" in task else {}),
                 f"{name}/nuisance_bg": nuis["balanced_acc"],
                 f"{name}/nuisance_bg_std": nuis["std"],
                 f"{name}/nuisance_bg_chance": nuis["majority_baseline"],
@@ -305,6 +313,8 @@ def run(cfg: DictConfig):
               f"hydrophone {chance[1]:.3f} "
               f"({nuis['n_hydrophones']} hydros, {nuis['n_clips']} Background clips)")
         if cfg.seal_test:
+            per = "  ".join(f"{v:.3f}" for v in task.get("per_fold", []))
+            print(f"ecotype per fold: {per}   (std {task.get('std', float('nan')):.3f})")
             print(f"n_train={task['n_train']} over {task['n_folds']} hydrophone folds; "
                   f"TEST SPLIT NOT TOUCHED, call-type skipped. The ecotype number here "
                   f"is optimistic against the reported one — the probe's folds are "
