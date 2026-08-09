@@ -137,6 +137,15 @@ class MIMDistillation(L.LightningModule):
         self.within_clip_var_weight = distill_cfg.get("within_clip_var_weight", 0.0)
         self.gamma = distill_cfg.get("gamma", 1.0)
         self.val_seed = distill_cfg.get("val_seed", 59)
+        # "random" scatters single patches, the MAE and iBOT convention. "bands"
+        # draws SpecAugment-shaped stripes instead, each one randomly a frequency
+        # band or a time band. See sample_student_mask for why the difference
+        # matters: a scattered tile can often be filled in from its immediate
+        # neighbours, whereas a stripe removes a whole region.
+        self.mask_strategy = distill_cfg.get("mask_strategy", "random")
+        self.max_time_band_frac = distill_cfg.get("max_time_band_frac", 0.25)
+        self.max_freq_band_frac = distill_cfg.get("max_freq_band_frac", 0.375)
+        self.p_freq_band = distill_cfg.get("p_freq_band", 0.5)
 
         # Entropy penalty on code usage. VICReg's variance term measures spread, not
         # coverage, so it reads healthy (vic_var = 0) while tanh saturation parks every
@@ -202,6 +211,17 @@ class MIMDistillation(L.LightningModule):
 
     # ---------------------------------------------------------------- masks
 
+    def _student_mask(self, valid, generator=None):
+        """Positions hidden from the student, under the configured strategy."""
+        return sample_student_mask(
+            valid, self.mask_ratio, generator=generator,
+            strategy=self.mask_strategy,
+            freq_patches=self.student["encoder"].freq_patches,
+            max_time_band_frac=self.max_time_band_frac,
+            max_freq_band_frac=self.max_freq_band_frac,
+            p_freq=self.p_freq_band,
+        )
+
     def _valid_mask(self, batch, num_patches, device):
         """(B, N) bool: positions backed by audio a human actually heard.
 
@@ -261,7 +281,7 @@ class MIMDistillation(L.LightningModule):
         num_patches = target_indices.shape[1]
 
         valid = self._valid_mask(batch, num_patches, student_wave.device)
-        student_mask = sample_student_mask(valid, self.mask_ratio)
+        student_mask = self._student_mask(valid)
 
         z = self(student_wave, mask=student_mask)                    # (B, N, L)
         logits = codebook_logits(z, self.fsq, self.temperature)      # (B, N, K)
@@ -303,6 +323,11 @@ class MIMDistillation(L.LightningModule):
                 "train/q_steps": qg["steps_l1"],
                 "train/q_within_one": qg["within_one"],
                 "train/valid_frac": valid.float().mean(),
+                # What fraction of the VALID positions was actually hidden. Under
+                # "bands" this exceeds mask_ratio by however much the last stripe
+                # added, so the configured number is a target and this is the fact.
+                "train/mask_frac": (student_mask.sum().float()
+                                    / valid.sum().clamp(min=1).float()),
                 "train/ema_decay": self._current_decay(),
             },
             prog_bar=True, on_step=True, on_epoch=True, batch_size=student_wave.shape[0],
@@ -348,7 +373,7 @@ class MIMDistillation(L.LightningModule):
 
         gen = torch.Generator(device=student_wave.device)
         gen.manual_seed(self.val_seed + batch_idx)
-        student_mask = sample_student_mask(valid, self.mask_ratio, generator=gen)
+        student_mask = self._student_mask(valid, generator=gen)
 
         z = self(student_wave, mask=student_mask)
         logits = codebook_logits(z, self.fsq, self.temperature)

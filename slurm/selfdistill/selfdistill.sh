@@ -181,6 +181,28 @@ DIVERSITY_WEIGHT="${DIVERSITY_WEIGHT:-}"
 # override the derivation.
 LEVELS="${LEVELS:-}"
 TEMPERATURE="${TEMPERATURE:-}"
+# How the student's hidden positions are chosen, and how many of them there are.
+#
+#   sbatch --export=ALL,MASK_STRATEGY=bands,MASK_RATIO=0.7 --account=def-XXXX \
+#          slurm/selfdistill/selfdistill.sh birdmae
+#
+# "random" scatters single 16x16 patches over the time-frequency grid, which is what
+# every run before 2026-08-09 used. "bands" draws SpecAugment-shaped stripes instead,
+# each one randomly a frequency band or a time band, until the ratio is covered.
+#
+# Why the shape matters and not just the amount: a scattered tile can often be filled in
+# by interpolating its immediate neighbours, so the model can solve the task locally,
+# whereas a stripe deletes a whole region and forces inference from surrounding context.
+# The reason to want that here is the pattern across three runs, where every change that
+# made the pretext task easier also raised the site information in the codes. Masking is
+# channel-agnostic difficulty, which is the kind we want more of.
+#
+# Under "bands" the ratio is a TARGET. Measured on the real 19-by-8 patch grid, asking
+# for 0.70 gives a mean coverage of 0.753 with a minimum of 0.704 and a maximum of 0.921,
+# because stripes are coarse and the last one overshoots. train/mask_frac logs what
+# actually happened.
+MASK_STRATEGY="${MASK_STRATEGY:-}"
+MASK_RATIO="${MASK_RATIO:-}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -234,6 +256,16 @@ VARIANT=""
 if [ -n "$DIVERSITY_WEIGHT" ]; then
   EXTRA+=("module.network.distill.diversity_weight=$DIVERSITY_WEIGHT")
   VARIANT="_div${DIVERSITY_WEIGHT}"
+fi
+
+if [ -n "$MASK_STRATEGY" ]; then
+  EXTRA+=("module.network.distill.mask_strategy=$MASK_STRATEGY")
+  VARIANT="${VARIANT}_${MASK_STRATEGY}"
+fi
+
+if [ -n "$MASK_RATIO" ]; then
+  EXTRA+=("module.network.distill.mask_ratio=$MASK_RATIO")
+  VARIANT="${VARIANT}_m${MASK_RATIO}"
 fi
 
 if [ -n "$LEVELS" ]; then

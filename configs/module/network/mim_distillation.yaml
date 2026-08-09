@@ -41,6 +41,38 @@ tokenizer:
 
 distill:
   mask_ratio: 0.6
+  # How the hidden positions are chosen. "random" scatters single 16x16 patches over
+  # the time-frequency grid, which is the MAE and iBOT convention and what every run
+  # before 2026-08-09 used. Worth stating because it was misremembered as time-only:
+  # the grid is time-major with frequency varying fastest, so random masking has always
+  # covered both axes.
+  #
+  # "bands" draws SpecAugment-shaped stripes instead, each one randomly a frequency band
+  # (a run of mel bins across all time) or a time band (a run of frames across all mel
+  # bins), until mask_ratio of the valid positions is covered. The point is what the
+  # model can do about it. A scattered tile is often recoverable by interpolating its
+  # immediate neighbours, so the task can be solved locally; a stripe deletes a whole
+  # region and forces inference from surrounding context. Bird-MAE's own pretraining
+  # used this pair at the spectrogram level, masking up to 50 of 128 mel bins and up to
+  # 100 of ~998 frames.
+  #
+  # Under "bands" mask_ratio is a TARGET, not an exact rate. Stripes are coarse — with 8
+  # frequency columns a 3-wide band is already 37.5% of the grid — so coverage overshoots
+  # by however much the last band added. Measured on the real 19-by-8 grid, a target of
+  # 0.70 gives a mean of 0.753 with a minimum of 0.704 and a maximum of 0.921. Read
+  # train/mask_frac for what a run actually did.
+  #
+  # Left at "random" so that switching it is a deliberate act recorded in the run name.
+  # Use MASK_STRATEGY on selfdistill.sh rather than editing this line, for the same
+  # reason the other levers work that way: the arms must not silently disagree.
+  mask_strategy: random
+  # Largest stripe as a fraction of the axis, so 0.25 of 19 time rows is 4 rows and
+  # 0.375 of 8 frequency columns is 3 columns. Bigger bands reach the coverage target in
+  # fewer draws and overshoot it further.
+  max_time_band_frac: 0.25
+  max_freq_band_frac: 0.375
+  # Probability that a given stripe is a FREQUENCY band rather than a time band.
+  p_freq_band: 0.5
   # Logits are -||z - code||^2 / temperature. At temperature=1 a PERFECT student still
   # pays CE 3.9 against a chance level of 5.5 (measured), i.e. the objective is mostly
   # an irreducible floor and the gradient is diffuse. 0.05 drops that floor to ~0.9.

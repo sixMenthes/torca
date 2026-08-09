@@ -48,7 +48,9 @@ def valid_token_mask(n_valid_samples, num_patches, freq_patches, sample_rate,
     return row_of_token.unsqueeze(0) < valid_rows.unsqueeze(1).to(idx.device)
 
 
-def sample_student_mask(valid, mask_ratio=0.6, generator=None):
+def sample_student_mask(valid, mask_ratio=0.6, generator=None, strategy="random",
+                        freq_patches=None, max_time_band_frac=0.25,
+                        max_freq_band_frac=0.375, p_freq=0.5):
     """Choose the positions to hide, sampled only among valid ones.
 
     Restricting to valid positions is not a detail: a 1 s clip is two-thirds padding,
@@ -56,10 +58,44 @@ def sample_student_mask(valid, mask_ratio=0.6, generator=None):
     "context" that is entirely silence — an unanswerable prediction problem.
 
     Guarantees >=1 masked position per sample (a row with no masked position
-    contributes no CE gradient and would silently shrink the effective batch).
+    contributes no CE gradient and would silently shrink the effective batch) and
+    >=1 UNmasked valid position (a sample with no visible context is unanswerable).
+
+    strategy="random" scatters individual patches over the whole time-frequency grid,
+    which is the MAE and iBOT convention and what every run before 2026-08-09 used. Note
+    that it has always covered BOTH axes: the grid is time-major with frequency varying
+    fastest, so index = time_row * freq_patches + freq_col, and a masked unit is one
+    16-by-16 tile rather than a whole time frame.
+
+    strategy="bands" is SpecAugment-shaped instead. It draws whole contiguous stripes,
+    each one randomly a frequency band (every time step, a run of mel bins) or a time
+    band (every mel bin, a run of frames), and keeps drawing until `mask_ratio` of the
+    valid positions is covered. The difference from scattered tiles is what the model
+    can do about it: a scattered tile can often be filled in by interpolating its
+    immediate neighbours, whereas a band removes an entire region and forces inference
+    from surrounding context. Bird-MAE's own pretraining used exactly this pair of
+    operations at the spectrogram level, with frequency masking over up to 50 of 128
+    mel bins and time masking over up to 100 of ~998 frames.
+
+    Bands are drawn at PATCH granularity, not frame granularity, which is coarser than
+    SpecAugment but is the right unit here: the mask is applied to patch embeddings, so
+    a stripe narrower than one patch could not be represented anyway.
+
+    `mask_ratio` is a target rather than an exact rate under "bands". Stripes are coarse
+    (with 8 frequency columns a 3-wide band is already 37.5% of the grid) so coverage
+    overshoots the target by however much the last band added. Watch train/mask_frac for
+    what was actually achieved.
+
+    freq_patches: number of patch columns along the frequency axis, needed only by
+    "bands" to know the grid shape. Passing None falls back to "random".
     """
     B, N = valid.shape
     n_valid = valid.sum(dim=1)                                   # (B,)
+
+    if strategy == "bands" and freq_patches:
+        return _band_mask(valid, mask_ratio, freq_patches, generator,
+                          max_time_band_frac, max_freq_band_frac, p_freq)
+
     n_mask = torch.clamp((n_valid.float() * mask_ratio).round().long(), min=1)
     n_mask = torch.minimum(n_mask, n_valid.clamp(min=1))
 
@@ -71,6 +107,60 @@ def sample_student_mask(valid, mask_ratio=0.6, generator=None):
     order = scores.argsort(dim=1)
     ranks = order.argsort(dim=1)
     return (ranks < n_mask.unsqueeze(1)) & valid
+
+
+def _band_mask(valid, mask_ratio, freq_patches, generator,
+               max_time_band_frac, max_freq_band_frac, p_freq):
+    """SpecAugment-shaped stripe masking over the patch grid. See sample_student_mask.
+
+    A Python loop over the batch rather than a vectorised draw, because each sample
+    needs a different NUMBER of bands to reach its coverage target (samples differ in
+    how much of them is padding). At batch 32 against a ViT-B forward pass the cost is
+    not measurable.
+    """
+    B, N = valid.shape
+    dev = valid.device
+    n_time = N // freq_patches
+    n_freq = freq_patches
+    max_t = max(1, int(round(n_time * max_time_band_frac)))
+    max_f = max(1, int(round(n_freq * max_freq_band_frac)))
+
+    def _draw(hi):
+        return int(torch.randint(1, hi + 1, (1,), device=dev, generator=generator))
+
+    out = torch.zeros_like(valid)
+    for b in range(B):
+        v = valid[b].view(n_time, n_freq)
+        n_v = int(v.sum())
+        if n_v == 0:
+            continue
+        # Cap below n_v so at least one valid position stays visible as context.
+        target = min(max(1, int(round(n_v * mask_ratio))), n_v - 1) if n_v > 1 else 1
+        m = torch.zeros(n_time, n_freq, dtype=torch.bool, device=dev)
+        # Bounded rather than while-True: with heavy padding a band can repeatedly land
+        # entirely on invalid rows and never advance the count.
+        for _ in range(64):
+            if int((m & v).sum()) >= target:
+                break
+            if float(torch.rand(1, device=dev, generator=generator)) < p_freq:
+                w = _draw(max_f)
+                s = int(torch.randint(0, max(1, n_freq - w + 1), (1,), device=dev,
+                                      generator=generator))
+                m[:, s:s + w] = True
+            else:
+                w = _draw(max_t)
+                s = int(torch.randint(0, max(1, n_time - w + 1), (1,), device=dev,
+                                      generator=generator))
+                m[s:s + w, :] = True
+        m &= v
+        if not bool(m.any()):                     # every band missed the valid region
+            idx = torch.nonzero(v.view(-1), as_tuple=False)[0]
+            m.view(-1)[idx] = True
+        elif n_v > 1 and int(m.sum()) == n_v:     # no context left, free one position
+            idx = torch.nonzero(m.view(-1), as_tuple=False)[0]
+            m.view(-1)[idx] = False
+        out[b] = m.view(-1)
+    return out
 
 
 def codebook_logits(z, fsq, temperature=1.0):

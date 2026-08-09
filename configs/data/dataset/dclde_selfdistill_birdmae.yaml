@@ -127,7 +127,21 @@ num_calls: 21
 
 class_to_balance: {}
 
-mean: -45.198
-std: 14.855
+# Bird-MAE's own XCL pretraining statistics, taken from the Bird-MAE repository, as of
+# 2026-08-09. They feed encoder.fbank_mean and fbank_std, and KaldiFbank standardises as
+# (fbank - mean) / (2 * std), matching Bird-MAE's own code.
+#
+# These replace -45.198 and 14.855, which were this project's own statistics measured
+# over DCLDE. For a FROZEN backbone the pretraining statistics are the right ones,
+# because the point is to hand the model the input distribution its weights expect, and
+# the frozen Bird-MAE cell is the one currently scoring 0.289 on the reported ecotype
+# protocol against an MFCC floor of 0.315.
+#
+# NOTE for anyone comparing runs across this change: it alters the input scaling for
+# every Bird-MAE cell, frozen and adapted alike, so numbers from before it are not
+# comparable to numbers after it on anything sensitive to input scale. C2, C4, the
+# div0.3 run and the teacherbg run all predate it.
+mean: -7.2
+std: 4.43
 clip_duration: 3.0
 target_length: ${data.transform.target_length}

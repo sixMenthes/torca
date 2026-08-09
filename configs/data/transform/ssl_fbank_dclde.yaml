@@ -21,20 +21,30 @@ input:
   num_mel_bins: 128
   dither: 0.0
   frame_shift: 10
-  # (fbank - mean) / (2*std), Bird-MAE's convention. These are torca's DCLDE stats;
-  # for a FROZEN baseline they should be Bird-MAE's XCL pretraining stats instead
-  # (still unconfirmed — they live in the feature extractor, not in any yaml).
+  # (fbank - mean) / (2*std), Bird-MAE's convention. As of 2026-08-09 these are
+  # Bird-MAE's own XCL pretraining statistics taken from its repository, replacing the
+  # DCLDE statistics this project had measured itself. See the dataset config for why
+  # the pretraining values are the right ones for a frozen backbone, and for the warning
+  # that the change breaks comparability with every Bird-MAE run before it.
   mean: ${data.dataset.mean}
   std: ${data.dataset.std}
 
 clip_duration: ${data.dataset.clip_duration}
 target_length: 304
 
-# Two-view augmentation. The ASYMMETRY is the de-confounding lever, not the strength:
-# the teacher sees the clip clean and the student sees it buried in noise from a
-# DIFFERENT hydrophone, so the only way to predict the teacher's tokens is to become
-# invariant to the recording channel. Leave `teacher` empty unless you specifically
-# want to test a symmetric-view variant.
+# Two-view augmentation. The asymmetry was DESIGNED as the de-confounding lever, on the
+# reasoning that a student seeing the clip buried in noise from a different hydrophone
+# can only predict the teacher's tokens by becoming invariant to the channel. Three runs
+# say the reasoning is backwards. Predicting the teacher's codes for a clip from site A
+# that has been buried in noise from site B is most reliably done by RECOGNISING both
+# channels and subtracting one, so the augmentation rewards learning every hydrophone's
+# signature. Every change that made the pretext task easier also raised the site
+# information carried by the codes, which went 0.511, then 0.727, then 0.829 bits, and
+# hydrophone decodability rose from 0.903 frozen to 0.947 adapted against a chance
+# of 0.100.
+#
+# Hence the current balance: cross-hydrophone noise is kept but small, and the
+# difficulty is carried by masking, which is channel-agnostic.
 #
 # Set any op's p to 0.0 to disable it (the datamodule skips those), which makes
 # ablating a single augmentation a one-flag override.
@@ -82,15 +92,24 @@ augmentations:
       min_snr_db: 0.0
       max_snr_db: 15.0
   student:
+    # Probabilities rebalanced on 2026-08-09, away from waveform augmentation and
+    # towards patch masking. The reasoning is that the task as posed rewards learning
+    # every hydrophone's signature: to predict the teacher's codes for a clip from site
+    # A that has been buried in noise from site B, the most reliable strategy available
+    # is to recognise both channels and subtract one. Measured across three runs, every
+    # change that made the pretext task easier also raised the site information carried
+    # by the codes, from 0.511 bits to 0.727 and then 0.829. Cross-hydrophone noise is
+    # the augmentation that creates that incentive, so it drops from 0.8 to 0.2 and the
+    # difficulty is moved into masking, which is channel-agnostic.
     shift:                  # offset jitter, non-cyclic zero-filled
-      p: 0.5
+      p: 0.05
       max_shift_seconds: 0.1
     gain:                   # volume jitter
-      p: 0.5
+      p: 0.05
       min_gain_db: -6.0
       max_gain_db: 6.0
     background:             # cross-hydrophone noise — the de-confounding op proper
-      p: 0.8
+      p: 0.2
       min_snr_db: 0.0
       max_snr_db: 15.0
 
