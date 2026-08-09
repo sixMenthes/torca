@@ -117,6 +117,28 @@ VAL_EVERY="${VAL_EVERY:-6}"
 # means val_ssl_set has never actually been constructed or read. A broken val path
 # should cost seconds at job start, not a full epoch.
 SANITY_STEPS="${SANITY_STEPS:-2}"
+# Objective reweighting, for comparison runs against the network config's default.
+# Empty means "whatever mim_distillation.yaml says", which is 1.0 and is the setting the
+# first eighteen-epoch run used. Set it to compare:
+#
+#   sbatch --export=ALL,DIVERSITY_WEIGHT=0.3 --account=def-XXXX \
+#          slurm/selfdistill/selfdistill.sh birdmae
+#
+# Why 0.3 is the comparison worth running, measured on the 1.0 run rather than argued:
+# CodeUsageProbe reported val/code_bg_token_bits 9.60 against val/code_call_token_bits
+# 9.49, out of a log2(1000)=9.97 ceiling, with all 1000 codes used by Background clips
+# alone. The codebook spends as much capacity representing NOISE as representing calls,
+# slightly more in fact, and a codebook with nothing held in reserve is the mechanism by
+# which spare capacity ends up encoding recording condition. Lowering the entropy penalty
+# is the direct lever on that. At 2000 steps a weight of 1.0 gave token_bits_frac 0.827
+# and it drifted to 0.976 over eighteen epochs, so 0.3 is aimed at settling near 0.85.
+#
+# Anything set here is appended to the task_name, so the two runs are distinguishable in
+# MLflow by NAME and not only by their params column. That matters more than it sounds:
+# the runs are otherwise identical down to the seed, which is fixed at 59 in
+# configs/selfdistill.yaml, so the run list would otherwise show two entries differing
+# only by timestamp.
+DIVERSITY_WEIGHT="${DIVERSITY_WEIGHT:-}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -142,8 +164,21 @@ case "$ARM" in
     echo "ERROR: unknown arm '$ARM' (birdmae | beats | birdmae_nobg)" >&2; exit 1 ;;
 esac
 
+# Objective variants ride on top of the arm, not instead of it, so that a reweighted
+# birdmae run is still the birdmae recipe in every other respect.
+VARIANT=""
+if [ -n "$DIVERSITY_WEIGHT" ]; then
+  EXTRA+=("module.network.distill.diversity_weight=$DIVERSITY_WEIGHT")
+  VARIANT="_div${DIVERSITY_WEIGHT}"
+fi
+
 date; hostname
 echo "Job $SLURM_JOB_ID on $SLURMD_NODENAME  |  arm=$ARM  network=$NETWORK"
+# An `if` rather than `[ ... ] && echo ...`: the AND-list form is exempt from set -e
+# only by a subclause of its rules, and this script runs with -e.
+if [ -n "$VARIANT" ]; then
+  echo "VARIANT: diversity_weight=$DIVERSITY_WEIGHT -> task_name=selfdistill_${ARM}${VARIANT}"
+fi
 
 # --- environment ----------------------------------------------------------
 module load StdEnv/2023 python/3.11 gcc arrow/22.0.0
@@ -224,7 +259,7 @@ srun python train_selfdistill.py \
     data.loaders.train.num_workers="$NWORKERS" \
     data.loaders.val.num_workers=2 \
     module.network.encoder.pretrained_weights_path="$CKPT" \
-    task_name="selfdistill_$ARM" \
+    task_name="selfdistill_${ARM}${VARIANT}" \
     "${EXTRA[@]}"
 
 echo "Finished with exit code $?"

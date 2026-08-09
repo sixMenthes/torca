@@ -117,6 +117,30 @@ distill:
   # At K=240 weight 1.0 pinned token_bits_frac at 0.943 with every code in every
   # batch; at K=1000 it sits at 0.858 with 673 of 1000, so the larger codebook
   # bought real headroom rather than forced uniformity.
+  #
+  # That last sentence did not survive a full run. Over eighteen epochs at 1.0
+  # (selfdistill_birdmae_2026-08-07_165712) token_bits_frac climbed from 0.858 at 2000
+  # steps to 0.976, with all 1000 codes used every epoch and 889 of them in every batch,
+  # so the headroom closed. The measurement that matters is CodeUsageProbe's, because it
+  # says what the capacity is being spent ON:
+  #
+  #     val/code_bg_token_bits     9.60     Background clips only
+  #     val/code_call_token_bits   9.49     vocalisation clips only
+  #     val/code_bg_codes_used     1000 / 1000
+  #     ceiling log2(1000)         9.97
+  #
+  # The codebook spends as much of itself representing NOISE as representing calls,
+  # marginally more, and background clips alone saturate it. That is the concrete form
+  # of the argument that a codebook with nothing held in reserve has capacity to spare
+  # for recording condition, which is the confound the study exists to measure. Forcing
+  # near-uniform usage also asserts something false about the data, where Background is
+  # common and calls are rare.
+  #
+  # A comparison run at 0.3 is in flight, aimed at settling token_bits_frac near 0.85.
+  # Launch it with DIVERSITY_WEIGHT=0.3 rather than by editing this line, so the two
+  # runs differ in one term and the arms cannot silently disagree — see
+  # slurm/selfdistill/selfdistill.sh. Change the default here only once the comparison
+  # is decided, because C3, C4 and C5 must all train under whatever it says.
   diversity_weight: 1.0
   # Weight on the E[H(q)] half of the LFQ form. OFF, unlike LFQ: at this sharp a
   # temperature per-token entropy is already ~0, so it adds nothing and dilutes the
