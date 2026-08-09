@@ -274,7 +274,7 @@ def quantisation_gap(z, fsq, logits, target_indices, mask, temperature):
 
 
 def codebook_diversity(logits, valid, softmax_scale=1.0, sample_entropy_weight=0.0,
-                       eps=1e-8):
+                       eps=1e-8, floor=None):
     """Entropy penalty on the soft code assignment: (w*E[H(q)] - H(E[q])) / log K.
 
     The term the objective is missing. VICReg variance measures SPREAD, and spread
@@ -321,11 +321,37 @@ def codebook_diversity(logits, valid, softmax_scale=1.0, sample_entropy_weight=0
 
     Normalised by log K so the value is comparable across different `levels`, for the
     same reason token_bits_frac is.
+
+    `floor` switches the term from a CONSTANT PULL to a HINGE, and the two are different
+    objectives rather than two strengths of one. Without it the term is -H(E[q])/log K,
+    which is minimised only when coverage is perfectly uniform, so it keeps pulling no
+    matter how healthy the codebook already is. Measured consequence: coverage is slammed
+    to 0.979 by epoch 2 and then spends sixteen epochs being clawed back down to 0.902 by
+    the cross-entropy, which is a strange way to spend a run, and the term sits within two
+    percent of its floor throughout so it is a near-constant added to the loss rather than
+    a regulariser.
+
+    With `floor` set the penalty is max(0, floor - coverage): exactly zero, with exactly
+    no gradient, while coverage is above the floor, and linear below it. Entropy is then
+    free to grow at whatever rate the cross-entropy wants, and the term does only the one
+    job it is needed for, which is preventing the collapse the ablation found at weight
+    zero (27 codes of 1000, coverage 0.065).
+
+    Two things to watch, because a hinge is a weaker guard than a constant pull. It is
+    REACTIVE, so it does nothing until coverage has already fallen through the floor, and
+    if a collapse is fast it may catch it too late; watch train/coverage against
+    train/codes_used_batch. And `diversity_weight` means something different under it: the
+    hinge's largest possible value is `floor` itself, reached only at total collapse,
+    where the constant-pull form sat near 1.0 at all times.
+
+    The hinge is defined on H(E[q]) alone and ignores `sample_entropy_weight`, whose
+    meaning inside a floor constraint is not clear. That term is off by default anyway.
     """
     sel = logits[valid] if valid is not None else logits.flatten(0, -2)
     if sel.numel() == 0:
         zero = logits.sum() * 0.0
-        return zero, {"diversity": zero.detach(), "soft_bits": zero.detach()}
+        return zero, {"diversity": zero.detach(), "soft_bits": zero.detach(),
+                      "coverage": zero.detach()}
 
     q = (sel.float() * softmax_scale).softmax(-1)             # (M, K)
     log_k = math.log(sel.shape[-1])
@@ -333,9 +359,16 @@ def codebook_diversity(logits, valid, softmax_scale=1.0, sample_entropy_weight=0
     batch_ent = -(q.mean(0) * torch.log(q.mean(0) + eps)).sum()        # H(E[q])
     sample_ent = -(q * torch.log(q + eps)).sum(-1).mean()              # E[H(q)]
 
-    loss = (sample_entropy_weight * sample_ent - batch_ent) / log_k
+    coverage = batch_ent / log_k                                       # in [0, 1]
+    if floor is None:
+        loss = (sample_entropy_weight * sample_ent - batch_ent) / log_k
+    else:
+        loss = torch.clamp(floor - coverage, min=0.0)
     return loss, {
         "diversity": loss.detach(),
+        # H(E[q]) as a fraction of its ceiling. The quantity the floor is compared
+        # against, and the one to watch to see whether the hinge ever fires.
+        "coverage": coverage.detach(),
         # bits the code distribution actually carries at this temperature; compare
         # against log2(K). The hard-assignment counterpart is train/token_bits.
         "soft_bits": (batch_ent / math.log(2)).detach(),

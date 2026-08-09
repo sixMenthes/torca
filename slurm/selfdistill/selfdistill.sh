@@ -223,6 +223,11 @@ TEMPERATURE="${TEMPERATURE:-}"
 # actually happened.
 MASK_STRATEGY="${MASK_STRATEGY:-}"
 MASK_RATIO="${MASK_RATIO:-}"
+# Turns the entropy penalty into a hinge that is zero above this coverage and linear
+# below it, so it prevents collapse without pinning the codebook at its ceiling.
+# Empty keeps the constant-pull form. See mim_distillation.yaml for why the two are
+# different objectives rather than two strengths of one.
+DIVERSITY_FLOOR="${DIVERSITY_FLOOR:-}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -276,6 +281,11 @@ VARIANT=""
 if [ -n "$DIVERSITY_WEIGHT" ]; then
   EXTRA+=("module.network.distill.diversity_weight=$DIVERSITY_WEIGHT")
   VARIANT="_div${DIVERSITY_WEIGHT}"
+fi
+
+if [ -n "$DIVERSITY_FLOOR" ]; then
+  EXTRA+=("module.network.distill.diversity_floor=$DIVERSITY_FLOOR")
+  VARIANT="${VARIANT}_floor${DIVERSITY_FLOOR}"
 fi
 
 if [ -n "$MASK_STRATEGY" ]; then

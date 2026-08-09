@@ -197,6 +197,31 @@ distill:
   # coverage signal. Measured at 1.0 it INVERTS the ordering — a collapsed batch
   # scores better than a healthy one, because collapsed z sits far from most codes
   # and so has a sharper per-token softmax. Only useful in softer regimes.
+  # null keeps the constant-pull form above. A float turns the term into a HINGE:
+  # max(0, floor - coverage), where coverage is H(E[q]) as a fraction of log K. It is
+  # exactly zero with exactly no gradient while coverage sits above the floor.
+  #
+  # Why that is a different objective and not just a weaker one. The constant-pull form
+  # is minimised only at perfectly uniform usage, so it never stops pulling: measured on
+  # the band run, coverage is slammed to 0.979 by epoch 2 and then clawed back down to
+  # 0.902 over sixteen epochs by the cross-entropy, while the term itself sits within two
+  # percent of its floor throughout and is therefore a near-constant added to the loss.
+  # A hinge lets entropy grow at whatever rate the cross-entropy wants and only intervenes
+  # near the collapse the ablation found at weight zero, which was 27 codes of 1000 at
+  # coverage 0.065.
+  #
+  # 0.5 is the intended setting. It sits far below anything a healthy run has produced,
+  # the lowest being 0.688 after epoch 1, and far above the collapse regime.
+  #
+  # Two cautions. The hinge is REACTIVE and does nothing until coverage has already fallen
+  # through the floor, so watch train/coverage against train/codes_used_batch and raise
+  # the floor if a collapse outruns it. And diversity_weight means something different
+  # here: the hinge's largest possible value is the floor itself, reached only at total
+  # collapse, where the old form sat near 1.0 always.
+  #
+  # Set it with DIVERSITY_FLOOR rather than by editing this line, so the arms cannot
+  # silently disagree.
+  diversity_floor: null
   diversity_sample_weight: 0.0
   # null = score coverage at the CE temperature. Counterintuitive but measured: at
   # 0.05 the ordering across healthy/16/4/1-code cases is monotonic with 0.60 of

@@ -157,6 +157,11 @@ class MIMDistillation(L.LightningModule):
         # right: softening both breaks the ordering (collapsed scores better than
         # healthy) and shrinks the gradient 10x. See codebook_diversity's docstring.
         self.diversity_temperature = distill_cfg.get("diversity_temperature", None)
+        # null keeps the constant-pull form. A float switches the term to a hinge
+        # that is zero above that coverage and linear below it, so it prevents
+        # collapse without pinning the entropy at its ceiling. See
+        # codebook_diversity for why those are different objectives.
+        self.diversity_floor = distill_cfg.get("diversity_floor", None)
 
         # Epoch-level code-usage histograms. Entropy of pooled counts is not the mean
         # of per-batch entropies, so the headline number has to come from an
@@ -263,6 +268,7 @@ class MIMDistillation(L.LightningModule):
             logits, valid,
             softmax_scale=scale,
             sample_entropy_weight=self.diversity_sample_weight,
+            floor=self.diversity_floor,
         )
 
     def training_step(self, batch, batch_idx):
@@ -349,6 +355,10 @@ class MIMDistillation(L.LightningModule):
                 # cannot see, and it costs nothing to watch for it.
                 "train/saturation_frac": saturation_frac(z, self.fsq, valid),
                 "train/diversity": div_parts["diversity"],
+                # H(E[q]) over its ceiling. Under the hinge this is the quantity
+                # the floor gates on, and train/diversity reads 0.0 whenever this
+                # sits above it, so the pair says whether the term ever fired.
+                "train/coverage": div_parts["coverage"],
                 "train/soft_bits": div_parts["soft_bits"],
             },
             on_step=True, on_epoch=False, batch_size=student_wave.shape[0],
@@ -412,6 +422,7 @@ class MIMDistillation(L.LightningModule):
                 "val/loss": loss,
                 "val/ce": ce,
                 "val/diversity": div_parts["diversity"],
+                "val/coverage": div_parts["coverage"],
                 # Temperature-free readout of the same error val/ce measures. val/ce
                 # is still the checkpoint-selection signal, which is sound because it
                 # ranks checkpoints under one fixed temperature; these are what you
