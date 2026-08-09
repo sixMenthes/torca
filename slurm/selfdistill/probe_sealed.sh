@@ -160,6 +160,7 @@ srun python probe_selfdistill.py \
     data.dataset.parquet_path="$PARQUET" \
     module.network.encoder.pretrained_weights_path="$BACKBONE" \
     num_workers=4 \
+    probe_n_jobs="${SLURM_CPUS_PER_TASK:-4}" \
     device=cuda \
     task_name="probe_sealed_$CELL"
 

@@ -84,8 +84,27 @@ emissions:
 
 n_mfcc: 40
 batch_size: 32
+# Dataloader workers for FEATURE EXTRACTION (the GPU pass). Distinct from probe_n_jobs
+# below, which parallelises the sklearn fits — the two stages are sequential, so they
+# do not contend and both should be set to the core count.
 num_workers: 4
 device: cuda
+
+# CV folds fitted in parallel. Folds are independent, and this loop was serial until
+# 2026-08-09, at which point it was the dominant cost of a probe run rather than the
+# GPU pass: C4 spent about three minutes extracting features and the C2 cell then ran
+# past twenty minutes inside sklearn. lbfgs on 21k rows of 768 features, multinomial,
+# max_iter=2000, five folds for ecotype and five more for the twelve-class nuisance
+# probe, one after another on one core.
+#
+# Set it to the job's core count. -1 means every visible core, which is right inside a
+# SLURM allocation and wrong on a shared login node.
+#
+# Nothing numerical changes: same folds, same seed, same solver, same tolerance, so
+# results stay comparable with cells measured before this existed. Each worker is
+# pinned to one BLAS thread, because otherwise the workers oversubscribe the cores and
+# the contention costs more than the parallelism gains.
+probe_n_jobs: 4
 
 seed: 59
 

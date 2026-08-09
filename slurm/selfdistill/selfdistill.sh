@@ -139,6 +139,35 @@ SANITY_STEPS="${SANITY_STEPS:-2}"
 # configs/selfdistill.yaml, so the run list would otherwise show two entries differing
 # only by timestamp.
 DIVERSITY_WEIGHT="${DIVERSITY_WEIGHT:-}"
+# Codebook size, the other lever on how much capacity there is to spend on channel.
+# Empty means the network config's [8, 5, 5, 5], which is K = 1000.
+#
+#   sbatch --export=ALL,LEVELS='[8,6,5]' --account=def-XXXX \
+#          slurm/selfdistill/selfdistill.sh birdmae
+#
+# Why this is a lever on the confound. It is NOT an information cap: mutual information
+# between site and code is bounded by log2(K), which is 7.91 bits at K=240, and the
+# measured val/code_bg_site_mi_excess is 0.51 bits, so the bound is nowhere near binding.
+# The argument is softer than that. With fewer codes each one has to cover more acoustic
+# variability, so the tokenizer must spend its vocabulary on whatever varies MOST, and a
+# secondary factor like recording chain is the kind of thing that gets merged away. The
+# supporting evidence is that K=240 and K=1000 recovered the same 4.1 to 4.5 bits about
+# the teacher's code at 2000 steps, so the compression did not cost content. What that
+# measurement cannot tell us is the site half, because CodeUsageProbe did not exist yet.
+#
+# TEMPERATURE MOVES WITH LEVELS AND IS DERIVED HERE. Logits are -d^2/tau, so tau has to
+# scale with the squared spacing of the FINEST axis, which is 1/(max_d(levels_d // 2)).
+# The reference point is [8,5,5,5], where that maximum is 4 and tau is 0.05, giving
+#
+#     tau = 0.05 * (4 / max_d(levels_d // 2))^2
+#
+# Any levels list containing an 8 therefore keeps tau at 0.05, and [8,6,5] is one of
+# those. A list like [5,5,5] does not: its maximum is 2 and tau must go to 0.2. Getting
+# this wrong does not fail, it just silently rescales the loss — which is exactly the
+# trap documented at length in mim_distillation.yaml. Set TEMPERATURE explicitly to
+# override the derivation.
+LEVELS="${LEVELS:-}"
+TEMPERATURE="${TEMPERATURE:-}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -192,6 +221,27 @@ VARIANT=""
 if [ -n "$DIVERSITY_WEIGHT" ]; then
   EXTRA+=("module.network.distill.diversity_weight=$DIVERSITY_WEIGHT")
   VARIANT="_div${DIVERSITY_WEIGHT}"
+fi
+
+if [ -n "$LEVELS" ]; then
+  # K = prod(levels) and tau = 0.05 * (4 / max(levels_d // 2))^2, in one awk pass so the
+  # two can never be derived from different lists.
+  read -r K TAU_DERIVED <<< "$(awk -v s="$LEVELS" 'BEGIN{
+      gsub(/[][ ]/, "", s); n = split(s, a, ",");
+      K = 1; m = 0;
+      for (i = 1; i <= n; i++) { K *= a[i]; h = int(a[i] / 2); if (h > m) m = h }
+      if (n == 0 || m == 0) { print "0 0"; exit }
+      printf "%d %.6g", K, 0.05 * (4.0 / m) ^ 2
+  }')"
+  if [ "$K" -le 1 ]; then
+    echo "ERROR: could not parse LEVELS='$LEVELS' — expected a form like '[8,6,5]'" >&2
+    exit 1
+  fi
+  TAU="${TEMPERATURE:-$TAU_DERIVED}"
+  EXTRA+=("module.network.tokenizer.levels=$LEVELS")
+  EXTRA+=("module.network.distill.temperature=$TAU")
+  VARIANT="${VARIANT}_K${K}"
+  echo "LEVELS=$LEVELS -> K=$K, temperature=$TAU$([ -n "$TEMPERATURE" ] && echo ' (explicit)' || echo ' (derived)')"
 fi
 
 date; hostname

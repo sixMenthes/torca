@@ -220,7 +220,7 @@ def run(cfg: DictConfig):
             m = tags == "train"
             task = probe_lib.probe_cv(
                 X[m], meta["label"][m], groups=meta["hydrophone"][m], cv="group",
-                seed=cfg.seed,
+                seed=cfg.seed, n_jobs=cfg.probe_n_jobs,
             )
             # probe_split_protocol's extra keys, so the printing and logging below do
             # not need a branch for every field.
@@ -234,12 +234,14 @@ def run(cfg: DictConfig):
             task = probe_lib.probe_split_protocol(
                 X, meta["label"], tags, hydrophone=meta["hydrophone"],
                 c_selection=cfg.c_selection, include_low_sr=cfg.include_low_sr,
+                n_jobs=cfg.probe_n_jobs,
             )
         # NUISANCE: hydrophone decodability from BACKGROUND clips only, on train.
         # Background-only is what makes it a channel measurement rather than a content
         # one — see probe.probe_nuisance_background.
         nuis = probe_lib.probe_nuisance_background(
-            X, meta["hydrophone"], tags, meta["label"] == bg_index
+            X, meta["hydrophone"], tags, meta["label"] == bg_index,
+            n_jobs=cfg.probe_n_jobs,
         )
 
         # CALL-TYPE: train-on-train / eval-on-test, C chosen by GroupKFold over the
@@ -254,7 +256,8 @@ def run(cfg: DictConfig):
             train_m = test_m = np.zeros(len(tags), dtype=bool)
         if train_m.sum() > 0 and test_m.sum() > 0:
             ct_C, _ = probe_lib.select_C(
-                X[train_m], meta["call"][train_m], meta["hydrophone"][train_m]
+                X[train_m], meta["call"][train_m], meta["hydrophone"][train_m],
+                n_jobs=cfg.probe_n_jobs,
             )
             r = probe_lib.probe_fixed_split(X, meta["call"], train_m, test_m, C=ct_C)
             ct = f"{r['balanced_acc']:.3f}"
