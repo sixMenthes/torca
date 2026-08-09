@@ -228,6 +228,20 @@ MASK_RATIO="${MASK_RATIO:-}"
 # Empty keeps the constant-pull form. See mim_distillation.yaml for why the two are
 # different objectives rather than two strengths of one.
 DIVERSITY_FLOOR="${DIVERSITY_FLOOR:-}"
+# Replicate seed. Empty keeps configs/selfdistill.yaml's 59.
+#
+# This exists because every configuration in the study is n=1, and the fold standard
+# deviation of the sealed probe measures only how much the PROBE wobbles given one
+# checkpoint. It says nothing about how much a different initialisation and data order
+# would move the checkpoint itself, which is a separate and unmeasured source of
+# variance. With the ecotype spread across five adapted cells at 0.062 and the probe's
+# own fold standard deviation between 0.06 and 0.10, the ranking of those cells is not
+# currently distinguishable from noise, and one replicate per contender is what settles
+# whether it is real.
+#
+# The frozen and MFCC control cells need no replicate: they never train, so there is no
+# seed for them to depend on.
+SEED="${SEED:-}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -281,6 +295,11 @@ VARIANT=""
 if [ -n "$DIVERSITY_WEIGHT" ]; then
   EXTRA+=("module.network.distill.diversity_weight=$DIVERSITY_WEIGHT")
   VARIANT="_div${DIVERSITY_WEIGHT}"
+fi
+
+if [ -n "$SEED" ]; then
+  EXTRA+=("seed=$SEED")
+  VARIANT="${VARIANT}_s${SEED}"
 fi
 
 if [ -n "$DIVERSITY_FLOOR" ]; then
