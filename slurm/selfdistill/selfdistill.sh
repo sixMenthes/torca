@@ -51,7 +51,21 @@
 ##SBATCH --cpus-per-task=14
 ##SBATCH --mem=250G
 #SBATCH --ntasks=1
-#SBATCH --time=24:00:00                  # SSL over 206k clips; measure, then tune
+# 3 hours, not 24. The 24 was a guess made against a 206k-clip pool before anything had
+# been measured; capping each hydrophone at 10,000 took the pool to 51,072 and an
+# eighteen-epoch run was then TIMED at 54 minutes, so 24 hours over-requests by a factor
+# of roughly twenty-five.
+#
+# That is not free, and it is not about allocation accounting. Slurm backfills short jobs
+# into gaps ahead of larger reservations, and a 24-hour job can only be backfilled into a
+# 24-hour gap, so the request itself is what makes these sit in PD (Priority). Three hours
+# leaves headroom for staging the tarball and for a slower arm while fitting into far more
+# scheduling holes.
+#
+# Jobs ALREADY QUEUED keep the limit they were submitted with. Lower them in place with
+#     scontrol update JobId=<id> TimeLimit=03:00:00
+# which Slurm permits because it is a reduction.
+#SBATCH --time=03:00:00
 #SBATCH --output=logs/slurm/%x_%j.out
 #SBATCH --error=logs/slurm/%x_%j.out
 ##SBATCH --mail-user=XXXX@gmail.com

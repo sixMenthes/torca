@@ -34,6 +34,22 @@ set -uo pipefail
 
 ARM="${1:-birdmae}"
 
+# Extra hydra overrides, passed verbatim to BOTH the composition check and the one-batch
+# run. Without this the preflight only ever exercises the DEFAULTS, so a submission that
+# sets a lever launches a code path nothing has run:
+#
+#   EXTRA_OVERRIDES="module.network.distill.mask_strategy=bands \
+#                    module.network.distill.mask_ratio=0.7" \
+#     bash slurm/selfdistill/preflight.sh
+#
+# That specific example is not hypothetical. Band masking was added on 2026-08-09 behind
+# a config key defaulting to "random", so a green preflight said nothing whatsoever about
+# whether the band path composes or runs.
+read -r -a EXTRA <<< "${EXTRA_OVERRIDES:-}"
+if [ ${#EXTRA[@]} -gt 0 ]; then
+  echo "extra overrides: ${EXTRA[*]}"
+fi
+
 # ============================== USER SETTINGS ==============================
 PROJECT_ROOT="${PROJECT_ROOT:-$HOME/projects/def-XXXX/$USER/torca}"
 VENV="${VENV:-$HOME/.torca_venv}"
@@ -89,7 +105,7 @@ python train_selfdistill.py --cfg job --resolve \
     paths.dataset_dir="$STAGE/data" \
     data.dataset.parquet_path="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet" \
     module.network.encoder.pretrained_weights_path="$CKPT" \
-    task_name="preflight_$ARM" >/dev/null \
+    task_name="preflight_$ARM" "${EXTRA[@]}" >/dev/null \
   || { echo "FAILED: config does not compose" >&2; exit 1; }
 echo "  composes"
 
@@ -104,7 +120,7 @@ python train_selfdistill.py \
     data.dataset.parquet_path="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet" \
     module.network.encoder.pretrained_weights_path="$CKPT" \
     data.loaders.train.num_workers=2 data.loaders.val.num_workers=2 \
-    task_name="preflight_$ARM" \
+    task_name="preflight_$ARM" "${EXTRA[@]}" \
   || { echo "FAILED: the run itself is broken, not the queue" >&2; exit 1; }
 
 echo
