@@ -155,8 +155,11 @@ case "$CELL" in
     echo "cell '$CELL' is not one of C0-C6; treating it as an adapted ${ARM:-birdmae} cell"
     ;;
 esac
-if [ "$SOURCE" = "adapted" ] && [ -z "$CKPT_PATH" ]; then
-  echo "ERROR: cell $CELL is an adapted cell and needs a checkpoint as the second argument" >&2
+if [ "$SOURCE" = "adapted" ] && [ -z "$CKPT_PATH" ] && [ -z "${CKPT_GLOB:-}" ]; then
+  echo "ERROR: cell $CELL is an adapted cell and needs a checkpoint, either as the" >&2
+  echo "       second argument or as CKPT_GLOB in the environment (which is resolved" >&2
+  echo "       inside the job, so a probe can be chained onto a training run that has" >&2
+  echo "       not written its checkpoint yet)." >&2
   exit 1
 fi
 # ==========================================================================
@@ -183,6 +186,21 @@ if [ ! -d "$PROJECT_ROOT" ]; then
 fi
 cd "$PROJECT_ROOT"
 mkdir -p logs/slurm
+
+# CKPT_GLOB resolves the checkpoint HERE, inside the job, rather than at submit time.
+# That is what makes a probe chainable onto a training run with --dependency: when the
+# pair is submitted together the checkpoint does not exist yet, so a path argument
+# would fail the existence check below before training had a chance to write it.
+# Unquoted on purpose, so the shell expands the pattern; newest match wins.
+if [ -z "$CKPT_PATH" ] && [ -n "${CKPT_GLOB:-}" ]; then
+  CKPT_PATH=$(ls -t $CKPT_GLOB 2>/dev/null | head -1)
+  if [ -z "$CKPT_PATH" ]; then
+    echo "ERROR: CKPT_GLOB matched nothing: $CKPT_GLOB" >&2
+    echo "       The training job it was chained to should have written a checkpoint." >&2
+    exit 1
+  fi
+  echo "resolved CKPT_GLOB -> $CKPT_PATH"
+fi
 
 if [ -n "$CKPT_PATH" ]; then
   [ -f "$CKPT_PATH" ] || { echo "ERROR: checkpoint not found: $CKPT_PATH" >&2; exit 1; }

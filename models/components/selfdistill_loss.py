@@ -390,6 +390,43 @@ def masked_ce(logits, target_indices, loss_mask):
     )
 
 
+def masked_mse(z, fsq, target_indices, loss_mask):
+    """Squared distance to the teacher's code, at masked+valid positions only.
+
+    The regression alternative to masked_ce. Both losses contain the SAME term — the
+    cross-entropy is
+
+        ||z_norm - c_target||^2 / temperature  +  log sum_k exp(-||z_norm - c_k||^2 / T)
+
+    and this is the first half of it, without the temperature and without the
+    log-normaliser. Three consequences follow, and they are the point of the comparison:
+
+      - There is no temperature to calibrate. The temperature exists only to set the
+        sharpness of a softmax, and there is no softmax here.
+      - There is no irreducible floor. masked_ce cannot go below 0.441 nats on
+        [8,5,5,5] or 0.585 on [8,6,5], because neighbouring codes always hold some
+        probability mass, which is also why those two arms' ce curves are not
+        comparable with each other. This one is zero when the student is exactly right,
+        and its value means the same thing at every codebook size.
+      - The gradient is 2*(z_norm - c_target), which vanishes at the target. The
+        cross-entropy's gradient is (2/T)*(E_p[c] - c_target), which does NOT vanish
+        there when a code's neighbourhood is asymmetric, so it keeps nudging a correct
+        student off its code.
+
+    What it gives up is TOLERANCE. A categorical target says "land anywhere in this
+    Voronoi cell"; this says "land on this exact point", which asks the student to
+    reproduce precision the teacher's own quantised output does not carry.
+
+    Distances are in the codebook's own normalised space, the same one codebook_logits
+    scores in, so the two losses are on comparable scales and a run can carry both.
+    """
+    if loss_mask.sum() == 0:
+        return z.sum() * 0.0
+    z_norm = normalised_z(z, fsq)                                # (B, N, L)
+    targets = fsq.codebook.to(z_norm.dtype)[target_indices]      # (B, N, L)
+    return ((z_norm - targets) ** 2).sum(-1)[loss_mask].mean()
+
+
 def code_counts(indices, valid, codebook_size):
     """Histogram of FSQ code usage over valid positions. (K,) long tensor.
 

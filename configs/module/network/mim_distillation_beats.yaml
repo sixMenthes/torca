@@ -45,6 +45,12 @@ distill:
   ema_decay_end: 0.9999
   mask_padding: true
   ce_weight: 1.0
+  # MUST match mim_distillation.yaml, which carries the rationale. Present here for the
+  # same reason the masking keys are: selfdistill.sh passes MSE_WEIGHT as a plain Hydra
+  # override, and a plain override of a key the config does not define fails at
+  # composition time, so a BEATs run of the regression recipe would die before the
+  # first step while the identical Bird-MAE run succeeded.
+  mse_weight: 0.0
   # OFF as of 2026-08-07, and this MUST match mim_distillation.yaml, which carries the
   # measurement. Summary: VICReg reads a perfect vic_cov 0.0000 on a tokenizer collapsed
   # to 27 codes, so it cannot see the failure it was meant to guard, and it lowers

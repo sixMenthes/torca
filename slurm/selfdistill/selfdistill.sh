@@ -242,6 +242,13 @@ DIVERSITY_FLOOR="${DIVERSITY_FLOOR:-}"
 # The frozen and MFCC control cells need no replicate: they never train, so there is no
 # seed for them to depend on.
 SEED="${SEED:-}"
+
+# Empty means "leave the objective alone", i.e. the ordinary cross-entropy. Setting it
+# swaps to the regression target; CE_WEIGHT then overrides what the cross-entropy is
+# turned down to, and 0.0 is what you want unless you are deliberately mixing them.
+# Declared here rather than only used below, because the script runs with `set -u`.
+MSE_WEIGHT="${MSE_WEIGHT:-}"
+CE_WEIGHT="${CE_WEIGHT:-}"
 # ==========================================================================
 
 # --- arm -> overrides -----------------------------------------------------
@@ -307,6 +314,19 @@ fi
 if [ -n "$SEED" ]; then
   EXTRA+=("seed=$SEED")
   VARIANT="${VARIANT}_s${SEED}"
+fi
+
+# Swap the categorical target for a regression onto the teacher's code. Setting this
+# turns the cross-entropy OFF as well as turning the squared distance on, in one step,
+# because the two are alternatives rather than terms to be mixed: a run with both
+# weights non-zero is neither objective and would not answer the question the arm
+# exists to ask. The suffix is loud on purpose — MSE is the whole point of the run and
+# it must be visible in squeue, in the output tree and in MLflow without opening
+# anything.
+if [ -n "$MSE_WEIGHT" ]; then
+  EXTRA+=("module.network.distill.mse_weight=$MSE_WEIGHT")
+  EXTRA+=("module.network.distill.ce_weight=${CE_WEIGHT:-0.0}")
+  VARIANT="${VARIANT}_MSE"
 fi
 
 if [ -n "$DIVERSITY_FLOOR" ]; then

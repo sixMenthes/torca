@@ -88,6 +88,16 @@ distill:
   # is what CodeUsageProbe compares.
   mask_padding: true
   ce_weight: 1.0
+  # The regression alternative to the categorical target. OFF by default; the pairing
+  # that swaps objectives is ce_weight=0.0 with mse_weight=1.0, which selfdistill.sh
+  # sets in one step through MSE_WEIGHT.
+  #
+  # Both terms are computed and logged whatever the weights are, so train/mse and
+  # val/mse are free diagnostics on an ordinary cross-entropy run. See masked_mse in
+  # models/components/selfdistill_loss.py for what the two objectives differ in: no
+  # temperature, no irreducible loss floor, a gradient that actually vanishes at the
+  # target, and in exchange no tolerance for landing anywhere inside the right cell.
+  mse_weight: 0.0
   # VICReg OFF as of 2026-08-07. Measured with ablate_terms.py, 2000 steps, four cells
   # over the two guards with everything else held fixed:
   #

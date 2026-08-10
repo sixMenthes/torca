@@ -55,6 +55,7 @@ from models.components.selfdistill_loss import (
     codebook_logits,
     entropy_bits,
     masked_ce,
+    masked_mse,
     quantisation_gap,
     sample_student_mask,
     saturation_frac,
@@ -132,6 +133,13 @@ class MIMDistillation(L.LightningModule):
         self.ema_decay_end = distill_cfg.get("ema_decay_end", None)
         self.mask_padding = distill_cfg.get("mask_padding", True)
         self.ce_weight = distill_cfg.get("ce_weight", 1.0)
+        # The regression alternative to the categorical target; see masked_mse. Both
+        # terms are always COMPUTED and logged, so a cross-entropy run still reports
+        # train/mse as a free diagnostic and the two objectives can be read off the
+        # same curves. Only the WEIGHTS decide which one trains the model, and the
+        # intended pairings are (ce_weight=1, mse_weight=0), the default, or
+        # (ce_weight=0, mse_weight=1).
+        self.mse_weight = distill_cfg.get("mse_weight", 0.0)
         self.var_weight = distill_cfg.get("var_weight", 1.0)
         self.cov_weight = distill_cfg.get("cov_weight", 0.04)
         self.within_clip_var_weight = distill_cfg.get("within_clip_var_weight", 0.0)
@@ -293,6 +301,7 @@ class MIMDistillation(L.LightningModule):
         logits = codebook_logits(z, self.fsq, self.temperature)      # (B, N, K)
 
         ce = masked_ce(logits, target_indices, student_mask)
+        mse = masked_mse(z, self.fsq, target_indices, student_mask)
         vic, vic_parts = vicreg(
             z, valid,
             gamma=self.gamma,
@@ -301,7 +310,8 @@ class MIMDistillation(L.LightningModule):
             within_clip_var_weight=self.within_clip_var_weight,
         )
         div, div_parts = self._diversity(logits, valid)
-        loss = self.ce_weight * ce + vic + self.diversity_weight * div
+        loss = (self.ce_weight * ce + self.mse_weight * mse
+                + vic + self.diversity_weight * div)
 
         with torch.no_grad():
             # Codebook usage is THE health metric: FSQNet's earlier failure was a
@@ -322,6 +332,10 @@ class MIMDistillation(L.LightningModule):
             {
                 "train/loss": loss,
                 "train/ce": ce,
+                # Logged on every run whatever the weights are, so a
+                # cross-entropy run and a regression run can be read off
+                # the same two curves.
+                "train/mse": mse,
                 "train/vic_var": vic_parts["vic_var"],
                 "train/vic_cov": vic_parts["vic_cov"],
                 "train/masked_acc": acc,
@@ -389,6 +403,7 @@ class MIMDistillation(L.LightningModule):
         logits = codebook_logits(z, self.fsq, self.temperature)
 
         ce = masked_ce(logits, target_indices, student_mask)
+        mse = masked_mse(z, self.fsq, target_indices, student_mask)
         vic, vic_parts = vicreg(
             z, valid, gamma=self.gamma, var_weight=self.var_weight,
             cov_weight=self.cov_weight,
@@ -408,7 +423,8 @@ class MIMDistillation(L.LightningModule):
         # preferentially saved the collapsed epoch — and that checkpoint is what
         # probe_selfdistill.py reads for every adapted cell.
         div, div_parts = self._diversity(logits, valid)
-        loss = self.ce_weight * ce + vic + self.diversity_weight * div
+        loss = (self.ce_weight * ce + self.mse_weight * mse
+                + vic + self.diversity_weight * div)
 
         counts = code_counts(target_indices, valid, self.fsq.codebook_size)
         self.val_code_counts += counts
@@ -421,6 +437,10 @@ class MIMDistillation(L.LightningModule):
             {
                 "val/loss": loss,
                 "val/ce": ce,
+                # Logged on every run whatever the weights are, so a
+                # cross-entropy run and a regression run can be read off
+                # the same two curves.
+                "val/mse": mse,
                 "val/diversity": div_parts["diversity"],
                 "val/coverage": div_parts["coverage"],
                 # Temperature-free readout of the same error val/ce measures. val/ce
