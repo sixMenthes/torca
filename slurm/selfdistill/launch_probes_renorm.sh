@@ -36,6 +36,23 @@ WHICH="${1:-all}"
 # version is that it is the number the study claims and it can be run once.
 SEAL="${SEAL:-1}"
 
+# The #SBATCH --time in probe_sealed.sh is 40 minutes, and that was sized for the SEALED
+# protocol: 10 logistic-regression fits, five for ecotype and five for hydrophone.
+#
+# The reported protocol asks for 47. The ecotype probe gains a nested C selection, which
+# is four C values by five folds, so 21 fits instead of 5; the call-type probe stops
+# being skipped and costs another 21; and the pool grows by a third, because sealing
+# dropped the val and test rows before extraction and now it does not. That is roughly
+# four times the sklearn work and, after six-way parallelism over folds, about three
+# times the wall-clock.
+#
+# A command-line --time overrides the #SBATCH directive, so the request is raised here
+# rather than by editing the job script, which would slow the cheap sealed runs too.
+WALLTIME="${WALLTIME:-}"
+if [ -z "$WALLTIME" ]; then
+  if [ "$SEAL" = "1" ]; then WALLTIME=00:40:00; else WALLTIME=01:45:00; fi
+fi
+
 # These MUST match launch_renorm.sh. They are not levers here; they are how the
 # task_name, and therefore the checkpoint path, is spelled.
 MAX_EPOCHS="${MAX_EPOCHS:-36}"
@@ -77,7 +94,7 @@ if compgen -G "logs/slurm/*.out" > /dev/null; then
 fi
 
 [ "$fail" -eq 0 ] || { echo "nothing submitted." >&2; exit 1; }
-echo "config checks passed."
+echo "config checks passed.  walltime request: $WALLTIME"
 
 # Spending the test split is a one-way door, so it announces itself rather than being
 # inferable from an environment variable nobody re-reads.
@@ -197,10 +214,10 @@ for row in "${PLAN[@]}"; do
   # It is passed through --export rather than exported into this shell so that the
   # value cannot leak into the next iteration if a future edit reorders this loop.
   if [ -n "$ckpt" ]; then
-    out=$(sbatch --account="$ACCOUNT" --export="ALL,ARM=$arm,SEAL=$SEAL" \
+    out=$(sbatch --account="$ACCOUNT" --time="$WALLTIME" --export="ALL,ARM=$arm,SEAL=$SEAL" \
                  slurm/selfdistill/probe_sealed.sh "$label" "$ckpt")
   else
-    out=$(sbatch --account="$ACCOUNT" --export="ALL,ARM=$arm,SEAL=$SEAL" \
+    out=$(sbatch --account="$ACCOUNT" --time="$WALLTIME" --export="ALL,ARM=$arm,SEAL=$SEAL" \
                  slurm/selfdistill/probe_sealed.sh "$label")
   fi
   echo "        $out"
