@@ -28,10 +28,23 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-ACCOUNT="${ACCOUNT:-def-ruthjoy}"
+# The allocation, and through it every default path below. A PLACEHOLDER on purpose,
+# the same one selfdistill.sh and probe_sealed.sh carry, so the real account name stays
+# out of the checkout. Set it in the environment:
+#
+#   ACCOUNT=def-yourpi SEAL=0 bash slurm/selfdistill/launch_probes_renorm.sh
+#
+# Leaving it unset is a hard error rather than a silent wrong path — see the guard
+# below. That distinction is not hypothetical: an unresolved placeholder is what killed
+# the first eleven jobs, and it did so four seconds into an allocation rather than here.
+ACCOUNT="${ACCOUNT:-def-XXXX}"
 SEEDS="${SEEDS:-11 17}"
 DRY_RUN="${DRY_RUN:-0}"
 WHICH="${1:-all}"
+# Write the pooled features out for project_embeddings.py. On by default; SAVE_FEATURES=0
+# turns it off. Passed to the jobs explicitly rather than left to their own default, for
+# the same reason the paths are.
+SAVE_FEATURES="${SAVE_FEATURES:-1}"
 # SEAL=0 spends the test split. See the block at the top of probe_sealed.sh; the short
 # version is that it is the number the study claims and it can be run once.
 SEAL="${SEAL:-1}"
@@ -65,6 +78,18 @@ cd "$(dirname "$0")/../.."
 REPO="$PWD"
 DATA_ROOT="${DATA_ROOT:-$HOME/projects/$ACCOUNT/$USER}"
 OUTPUT_DIR="${OUTPUT_DIR:-$DATA_ROOT}"
+# PROJECT_ROOT is the checkout this script is running from, which is also the checkout
+# whose configs the guards below inspect. Passing it to the jobs rather than letting
+# them work it out closes a gap that has already cost a whole batch: probe_sealed.sh
+# defaults PROJECT_ROOT and DATA_ROOT to $HOME/projects/def-XXXX/$USER, a placeholder
+# that only ever resolved because the real value arrived from the submitting shell's
+# environment. The first eleven jobs were submitted with an explicit --export list,
+# that inheritance stopped, and all seven that started died in four seconds at
+# `cd: /home/sixmints/projects/def-XXXX/sixmints/torca: No such file or directory`.
+#
+# It also removes a subtler hazard. The guards below check THIS tree, so a job that
+# resolved a different PROJECT_ROOT would be running code nothing had validated.
+PROJECT_ROOT="$REPO"
 echo "repo:    $REPO"
 echo "runs in: $OUTPUT_DIR/runs"
 
@@ -75,6 +100,11 @@ echo "runs in: $OUTPUT_DIR/runs"
 # undo, and it does so silently.
 fail=0
 note() { echo "  BLOCKED: $1" >&2; fail=1; }
+
+[ "$ACCOUNT" != "def-XXXX" ] \
+  || note "ACCOUNT is still the placeholder def-XXXX. Every default path below is built
+           from it, so nothing would resolve. Re-run as:
+             ACCOUNT=def-yourpi SEAL=$SEAL bash \$0 ${WHICH#all}"
 
 grep -qE '^mean: -7\.2$' configs/data/dataset/dclde_selfdistill_birdmae.yaml \
   || note "the Bird-MAE dataset config does not carry mean: -7.2, so the probe would
@@ -93,8 +123,28 @@ if compgen -G "logs/slurm/*.out" > /dev/null; then
   fi
 fi
 
+# Everything the job itself checks and exits on, checked HERE instead, on the login
+# node, where the failure costs nothing. The job's own checks are four seconds into a
+# scheduled allocation and report one cell at a time; these report all of them at once
+# and before anything is queued.
+[ -d "$PROJECT_ROOT" ] \
+  || note "PROJECT_ROOT does not exist: $PROJECT_ROOT"
+[ -d "$OUTPUT_DIR" ] \
+  || note "OUTPUT_DIR does not exist: $OUTPUT_DIR — check that ACCOUNT=$ACCOUNT is right,
+           since it is what the default path is built from"
+[ -f "$DATA_ROOT/dclde_clips_3s.tar" ] \
+  || note "the clip tarball is not at $DATA_ROOT/dclde_clips_3s.tar"
+[ -e "$DATA_ROOT/Bird-MAE-B" ] \
+  || note "the Bird-MAE backbone is not at $DATA_ROOT/Bird-MAE-B"
+[ -e "$DATA_ROOT/BEATs_iter3.pt" ] \
+  || note "the BEATs backbone is not at $DATA_ROOT/BEATs_iter3.pt"
+[ -f "$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet" ] \
+  || note "the manifest is not at $PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
+
 [ "$fail" -eq 0 ] || { echo "nothing submitted." >&2; exit 1; }
 echo "config checks passed.  walltime request: $WALLTIME"
+echo "PROJECT_ROOT: $PROJECT_ROOT"
+echo "DATA_ROOT:    $DATA_ROOT"
 
 # Spending the test split is a one-way door, so it announces itself rather than being
 # inferable from an environment variable nobody re-reads.
@@ -210,14 +260,29 @@ for row in "${PLAN[@]}"; do
     continue
   fi
 
-  # ARM is read from the environment by probe_sealed.sh for any label outside C0-C6.
-  # It is passed through --export rather than exported into this shell so that the
-  # value cannot leak into the next iteration if a future edit reorders this loop.
+  # Everything the job needs is named here rather than inherited. ARM selects the
+  # backbone for any label outside C0-C6; SEAL and SAVE_FEATURES are the two levers;
+  # and PROJECT_ROOT, DATA_ROOT and OUTPUT_DIR override placeholder defaults that
+  # otherwise resolve to a directory that does not exist.
+  #
+  # An explicit --export list is what broke this the first time, because the real paths
+  # had been arriving from the submitting shell's environment and the list stopped them.
+  # The repair is not to go back to inheriting them — that only worked by luck of how
+  # the shell happened to be set up — but to state them, so the job's behaviour is a
+  # property of this command line and nothing else. --export splits on commas and none
+  # of these values contain one.
+  #
+  # The job name carries the cell. Without it every row of `squeue` reads probe_sealed
+  # and the only way to tell which cell a job ID belongs to is to open its log.
+  EXPORTS="ALL,ARM=$arm,SEAL=$SEAL,SAVE_FEATURES=$SAVE_FEATURES"
+  EXPORTS="$EXPORTS,PROJECT_ROOT=$PROJECT_ROOT,DATA_ROOT=$DATA_ROOT,OUTPUT_DIR=$OUTPUT_DIR"
   if [ -n "$ckpt" ]; then
-    out=$(sbatch --account="$ACCOUNT" --time="$WALLTIME" --export="ALL,ARM=$arm,SEAL=$SEAL" \
+    out=$(sbatch --account="$ACCOUNT" --time="$WALLTIME" --export="$EXPORTS" \
+                 --job-name="pr_$label" \
                  slurm/selfdistill/probe_sealed.sh "$label" "$ckpt")
   else
-    out=$(sbatch --account="$ACCOUNT" --time="$WALLTIME" --export="ALL,ARM=$arm,SEAL=$SEAL" \
+    out=$(sbatch --account="$ACCOUNT" --time="$WALLTIME" --export="$EXPORTS" \
+                 --job-name="pr_$label" \
                  slurm/selfdistill/probe_sealed.sh "$label")
   fi
   echo "        $out"

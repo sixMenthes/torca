@@ -170,6 +170,17 @@ export MLFLOW_ALLOW_FILE_STORE=true
 # Compute nodes have no internet; CodeCarbon must not try to geolocate.
 export CODECARBON_LOG_LEVEL=error
 
+# A bare `cd` into a placeholder path fails with the shell's own terse message four
+# seconds into an allocation, and gives no hint that ACCOUNT is what needs setting.
+# It has already cost a full batch of eleven jobs, so it says so now.
+if [ ! -d "$PROJECT_ROOT" ]; then
+  echo "ERROR: PROJECT_ROOT does not exist: $PROJECT_ROOT" >&2
+  echo "       The default is built from a PLACEHOLDER allocation name, so it only" >&2
+  echo "       resolves when PROJECT_ROOT or ACCOUNT is supplied. Submit through" >&2
+  echo "       slurm/selfdistill/launch_probes_renorm.sh, which passes it, or set it:" >&2
+  echo "         sbatch --export=ALL,PROJECT_ROOT=\$HOME/projects/def-yourpi/\$USER/torca ..." >&2
+  exit 1
+fi
 cd "$PROJECT_ROOT"
 mkdir -p logs/slurm
 

@@ -28,7 +28,10 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-ACCOUNT="${ACCOUNT:-def-ruthjoy}"
+# A PLACEHOLDER, matching selfdistill.sh and probe_sealed.sh, so the real allocation
+# name stays out of the checkout. Set it in the environment:
+#   ACCOUNT=def-yourpi bash slurm/selfdistill/launch_renorm.sh
+ACCOUNT="${ACCOUNT:-def-XXXX}"
 MAX_EPOCHS="${MAX_EPOCHS:-36}"
 # `VAL_EVERY` must DIVIDE `MAX_EPOCHS`. Lightning validates when (epoch + 1) % N == 0 and
 # model_checkpoint only writes on an epoch that validates, so a value that does not
@@ -55,6 +58,10 @@ echo "repo: $REPO"
 # instead of warnings.
 fail=0
 note() { echo "  BLOCKED: $1" >&2; fail=1; }
+
+[ "$ACCOUNT" != "def-XXXX" ] \
+  || note "ACCOUNT is still the placeholder def-XXXX. Re-run as:
+             ACCOUNT=def-yourpi bash \$0"
 
 grep -q 'mean=mean, std=std' selfdistill_datamodule.py \
   || note "selfdistill_datamodule.py does not pass mean/std to make_frontend — this is
