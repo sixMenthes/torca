@@ -49,6 +49,20 @@ ckpt_path: null
 # hydrophone in the pool. It is a trend instrument, not a preview of the result.
 seal_test: false
 
+# Directory to write the extracted features to, for offline UMAP/t-SNE projection.
+# null = off, which is the default because the files are tens of megabytes per cell.
+#
+# The projection has to happen SOMEWHERE OTHER than here. Fitting it inside this run
+# would mean a UMAP per cell computed by a different process against a different
+# random state, and the whole point of the figure is that every cell is projected the
+# same way so the panels can be compared. Writing the features out and projecting them
+# in one pass afterwards is what makes that possible; project_embeddings.py does it.
+#
+# Written as float16. That is lossy at about 1e-3 relative, which is irrelevant to a
+# 2-D neighbour embedding and would NOT be acceptable for the probe numbers — those are
+# computed here from the float32 originals and never read this file.
+save_features: null
+
 # Which encoder blocks to pool from. null = final output (the headline metric).
 # A list sweeps depth: recording condition is a low-level property, so the confound
 # plausibly sits in early blocks — watching nuisance decodability fall across depth

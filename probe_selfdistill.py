@@ -172,6 +172,39 @@ def run(cfg: DictConfig):
                 f"prestage_clips.py --manifest-only so the manifest matches the tree."
             )
 
+    # Optional: write the features out for offline projection. This happens BEFORE the
+    # probes run, so a crash in sklearn does not cost the backbone pass that produced
+    # them — that pass is the expensive part of this script and the projection figure
+    # needs nothing else from it.
+    if cfg.get("save_features"):
+        out_dir = Path(cfg.save_features)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Integer codes are meaningless without their maps, and the maps live on the
+        # datamodule rather than in the config, so they travel WITH the features. A
+        # features file that needs this script re-run to be interpreted is not a
+        # portable artifact.
+        label_names = [n for n, _ in sorted(dm.label_map.items(), key=lambda kv: kv[1])]
+        call_names = [n for n, _ in sorted((dm.call_map or {}).items(),
+                                           key=lambda kv: kv[1])]
+        for name, (X, meta) in cells.items():
+            path = out_dir / f"{cfg.cell}_{name}.npz"
+            np.savez_compressed(
+                path,
+                X=X.astype(np.float16),
+                label=meta["label"], call=meta["call"],
+                hydrophone=meta["hydrophone"].astype(str),
+                tags=np.asarray(tags).astype(str),
+                label_names=np.array(label_names),
+                call_names=np.array(call_names),
+                cell=str(cfg.cell), layer=str(name), source=str(cfg.source),
+                encoder=("none (MFCC)" if cfg.source == "mfcc"
+                         else str(cfg.module.network.encoder.name)),
+                ckpt_path=str(cfg.get("ckpt_path")),
+                seal_test=bool(cfg.seal_test),
+            )
+            log.info(f"wrote features for cell '{cfg.cell}' layer '{name}' to {path} "
+                     f"({path.stat().st_size / 1e6:.1f} MB, {X.shape[0]} clips)")
+
     # Background index drives the nuisance probe's channel-only restriction.
     bg_index = dm.label_map.get("Background", -1)
     if bg_index < 0:

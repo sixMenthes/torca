@@ -65,11 +65,49 @@ set -euo pipefail
 CELL="${1:?usage: sbatch probe_sealed.sh <cell> [ckpt]   e.g. C2, or C4 /path/last.ckpt}"
 CKPT_PATH="${2:-}"
 
+# Sealed by default, which is what this script is named for. SEAL=0 runs the REPORTED
+# protocol instead: fit the probe on the train hydrophones, choose C by GroupKFold
+# within train, and score ONCE on the held-out test hydrophones.
+#
+# The reported protocol is the number the study actually claims, because the test split
+# is held out BY HYDROPHONE (StraitofGeorgia, CarmanahPt, BarkleyCanyon) and therefore
+# measures generalisation to recording sites the encoder never adapted on. The sealed
+# number is a proxy for it and reads optimistically high, since the backbone adapted on
+# every site in its GroupKFold pool. It also unlocks the call-type probe, which is
+# skipped entirely under seal because its test mask IS the sealed split.
+#
+# It can only be spent once. Read the seal_test block in configs/probe.yaml before
+# setting this, and decide which cells go in the table BEFORE looking at any of them:
+# choosing the winner afterwards is model selection on the test split.
+SEAL="${SEAL:-1}"
+case "$SEAL" in
+  1|true|yes)  SEAL_TEST=true;  PROTOCOL=sealed ;;
+  0|false|no)  SEAL_TEST=false; PROTOCOL=reported ;;
+  *) echo "SEAL must be 1 or 0, got '$SEAL'" >&2; exit 1 ;;
+esac
+
+# Write the pooled features out alongside the metrics, so the UMAP figure can be built
+# on the workstation without re-running the backbone pass or rsyncing a 1.4 GB
+# checkpoint. SAVE_FEATURES=0 turns it off. Roughly 40 MB per cell as float16.
+#
+# One directory for the whole batch, and the filenames carry the cell, because a
+# projection is only comparable across cells when every cell was projected by the same
+# fit — which means one process reading all of them at once.
+SAVE_FEATURES="${SAVE_FEATURES:-1}"
+
 # ============================== USER SETTINGS ==============================
 PROJECT_ROOT="${PROJECT_ROOT:-$HOME/projects/def-XXXX/$USER/torca}"
 VENV="${VENV:-$HOME/.torca_venv}"
 DATA_ROOT="${DATA_ROOT:-$HOME/projects/def-XXXX/$USER}"
 OUTPUT_DIR="${OUTPUT_DIR:-$DATA_ROOT}"
+# Resolved here rather than beside SAVE_FEATURES above, because OUTPUT_DIR is not
+# defined until this line and the script runs with `set -u`. An `if` rather than an
+# AND-list for the reason given in selfdistill.sh: the AND-list form is exempt from
+# `set -e` only by a subclause of its rules.
+FEATURE_DIR=null
+if [ "$SAVE_FEATURES" != "0" ]; then
+  FEATURE_DIR="$OUTPUT_DIR/features/$PROTOCOL"
+fi
 TARBALL="${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}"
 PARQUET="$PROJECT_ROOT/ds/DCLDE_w_Buzzes.parquet"
 # The CONTROL cells matter as much as the adapted ones here, and more than they did
@@ -168,7 +206,8 @@ srun python probe_selfdistill.py \
     paths=cluster \
     hydra=cluster \
     source="$SOURCE" \
-    seal_test=true \
+    seal_test="$SEAL_TEST" \
+    save_features="$FEATURE_DIR" \
     cell="$CELL" \
     "${CKPT_OVERRIDE[@]}" \
     module/network="$NETWORK" \
@@ -179,7 +218,7 @@ srun python probe_selfdistill.py \
     num_workers=4 \
     probe_n_jobs="${SLURM_CPUS_PER_TASK:-4}" \
     device=cuda \
-    task_name="probe_sealed_$CELL"
+    task_name="probe_${PROTOCOL}_$CELL"
 
 echo "Finished with exit code $?"
 echo
