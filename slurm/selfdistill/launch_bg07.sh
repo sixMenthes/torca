@@ -247,8 +247,17 @@ echo "  cat \$OUTPUT_DIR/../mlruns/*/*/params/data/transform/augmentations/stude
 if [ "$MODE" = "calibrate" ]; then
   echo
   echo "WHEN THE CALIBRATION RUN FINISHES, price the campaign from its one epoch:"
-  echo "  PER_EPOCH=\$(<seconds for the single epoch>) \\"
-  echo "    bash slurm/selfdistill/launch_bg07.sh estimate"
-  echo "Take the seconds from emissions/duration_s on that run, or from the elapsed"
-  echo "time in sacct: sacct -j ${ids[0]} --format=JobID,Elapsed,State"
+  echo "  PER_EPOCH=<seconds> bash slurm/selfdistill/launch_bg07.sh estimate"
+  echo
+  echo "Take the number from emissions/duration_s in the run's MLflow record:"
+  echo "  cat \$OUTPUT_DIR/mlruns/*/*/metrics/emissions/duration_s | tail -1"
+  echo
+  echo "NOT from sacct Elapsed. That includes untarring the clip archive before"
+  echo "training starts, which is minutes of work that happens once per job and"
+  echo "not once per epoch, so it would inflate every projection."
+  echo
+  echo "Treat the result as an UPPER BOUND on seconds per epoch. A one-epoch run"
+  echo "validates once for its single epoch, whereas the real runs validate every"
+  echo "$VAL_EVERY-th epoch, and validation carries the online probes. The per-epoch"
+  echo "share of validation is therefore about ${VAL_EVERY}x larger here than it will be."
 fi
