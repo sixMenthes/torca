@@ -16,6 +16,7 @@
 #   sbatch slurm/selfdistill/selfdistill.sh birdmae        # C4  <- start here
 #   sbatch slurm/selfdistill/selfdistill.sh beats          # C3
 #   sbatch slurm/selfdistill/selfdistill.sh birdmae_nobg   # C5, the control
+#   sbatch slurm/selfdistill/selfdistill.sh birdmae_bg07   # C6, the control at p = 0.7
 #
 # C5 is not optional if you want to claim the de-confounding is caused by the
 # invariance objective: adapting on in-domain audio reorganises features on its
@@ -270,6 +271,30 @@ case "$ARM" in
     NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
     CKPT="$BIRDMAE_CKPT"
     EXTRA=(data.transform.augmentations.student.background.p=0.0) ;;
+  birdmae_bg07)
+    # The attribution control at a HIGH dose. C5 (birdmae_nobg) removes cross-hydrophone
+    # noise entirely and C4 (birdmae) runs it at p = 0.2 since commit 35bbbeb, so this
+    # arm makes 0.0 / 0.2 / 0.7 a dose series on one lever with everything else fixed.
+    #
+    # Why the arm exists: C5 was written on 2026-08-05, when the config carried p = 0.8,
+    # and 35bbbeb cut the probability to 0.2 on 2026-08-09 without re-scoping the
+    # control. C5 is therefore a 0.2-against-0.0 contrast, and the mechanism metric does
+    # not separate the two: site mutual information is 0.959 / 1.226 bits for C5 against
+    # 1.126 / 0.696 for C4, fully overlapping across seeds.
+    #
+    # NOT 0.8. The pre-35bbbeb config used 0.8, and 0.7 is deliberately a different
+    # number so that a run from this arm can never be mistaken for a pre-renormalisation
+    # run in the store. Change the override AND the arm name together if you want 0.8.
+    #
+    # Read NUISANCE here, not the loss and not ecotype. At this strength the student
+    # sees foreign noise on most views, so the pretext task is harder by construction: a
+    # higher ce or a lower masked_acc is expected and is not a failure signal. Ecotype
+    # accuracy is expected to fall, which confounds de-confounding pressure with task
+    # difficulty, and is why the arm is read as a trend across three doses rather than
+    # as a single comparison.
+    NETWORK="mim_distillation";        DATASET="dclde_selfdistill_birdmae"
+    CKPT="$BIRDMAE_CKPT"
+    EXTRA=(data.transform.augmentations.student.background.p=0.7) ;;
   birdmae_teacherbg)
     # Cross-hydrophone noise on the TEACHER view as well, with an independent draw, so
     # the target codes are computed on a channel-mixed clip instead of a clean one.
@@ -292,7 +317,7 @@ case "$ARM" in
     EXTRA=(data.transform.augmentations.teacher.background.p=0.8) ;;
   *)
     echo "ERROR: unknown arm '$ARM'" >&2
-    echo "       (birdmae | beats | birdmae_nobg | birdmae_teacherbg)" >&2
+    echo "       (birdmae | beats | birdmae_nobg | birdmae_bg07 | birdmae_teacherbg)" >&2
     exit 1 ;;
 esac
 
@@ -428,6 +453,43 @@ echo "Staged $NCLIPS wav files to $DATA_DIR"
 # A 3s run against a 5s prestage finds nothing and trains on empty batches
 # without erroring, so fail loudly here instead.
 [ "$NCLIPS" -gt 1000 ] || { echo "ERROR: only $NCLIPS clips staged — wrong tarball or wrong clip_duration?" >&2; exit 1; }
+
+# --- optional GPU power sampling (POWER_SAMPLE=1) -------------------------
+# WHY THIS EXISTS. codecarbon reads GPU energy through NVML, and NVML reports energy
+# per DEVICE, not per MIG instance. On a MIG slice it therefore returns nothing usable,
+# which is why every run in the store carries emissions/gpu_energy_kwh = 0.0 while the
+# CPU and RAM figures are real. The GPU is the largest term in a training job, so the
+# logged co2eq_kg is an undercount of the dominant contribution rather than a small error.
+#
+# What CAN be read on a MIG node is whole-device power draw. That is not our slice: the
+# other instances on the same card belong to other jobs and their load is included. It is
+# an UPPER BOUND on our share and a lower bound on nothing, so it is recorded as a
+# diagnostic and never used directly as our consumption. estimate_emissions.py attributes
+# a fraction of the device instead, and the samples here are what let you sanity-check
+# that the fraction is not absurd.
+#
+# Cost is one nvidia-smi call every 20 s writing one CSV line, so it is left off by
+# default and turned on for calibration runs only.
+POWER_CSV=""
+if [ "${POWER_SAMPLE:-0}" = "1" ] && command -v nvidia-smi >/dev/null 2>&1; then
+  POWER_CSV="$OUTPUT_DIR/power/${SLURM_JOB_ID}_power.csv"
+  mkdir -p "$(dirname "$POWER_CSV")"
+  echo "timestamp_s,power_w,mem_used_mib" > "$POWER_CSV"
+  (
+    while true; do
+      line=$(nvidia-smi --query-gpu=power.draw,memory.used \
+                        --format=csv,noheader,nounits 2>/dev/null | head -1)
+      [ -n "$line" ] && echo "$(date +%s),${line// /}" >> "$POWER_CSV"
+      sleep 20
+    done
+  ) &
+  POWER_PID=$!
+  # Kill the sampler however the script leaves, including on failure, so a crashed job
+  # does not leave a background loop attached to the allocation.
+  trap 'kill "$POWER_PID" 2>/dev/null || true' EXIT
+  echo "POWER_SAMPLE: device draw every 20 s -> $POWER_CSV"
+  echo "  NOTE: this is WHOLE-DEVICE power on a shared MIG card, not this job's share."
+fi
 
 # --- run ------------------------------------------------------------------
 # paths=cluster hydra=cluster are NOT optional. selfdistill.yaml defaults to the
