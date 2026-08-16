@@ -124,8 +124,29 @@ if [ -n "${DATA_ROOT:-}" ] && [ -d "${DATA_ROOT:-/nonexistent}" ]; then
     || note "no clip tarball at ${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}. Run
              prestage_selfdistill_data.sh on a LOGIN node first — compute nodes have no
              internet, so the job cannot fetch it itself."
-  [ -d "${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}" ] \
+  # -e, not -d. Bird-MAE-B may be a HuggingFace-style directory OR a single weights
+  # file depending on how it was staged, and selfdistill.sh passes it straight through
+  # to module.network.encoder.pretrained_weights_path without caring which. Testing for
+  # a directory here rejected a perfectly good file.
+  [ -e "${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}" ] \
     || note "no Bird-MAE backbone at ${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}"
+fi
+
+# THE TREE THAT RUNS IS NOT ALWAYS THE TREE YOU LAUNCHED FROM. This launcher locates the
+# repo from its own position on disk, but the job does `cd "$PROJECT_ROOT"` before it runs
+# train_selfdistill.py. With two separate checkouts the batch script comes from one and
+# every line of Python from the other, so a `git pull` in the wrong one changes nothing
+# that matters and the config checks above would be reading a file that never executes.
+if [ -n "${PROJECT_ROOT:-}" ] && [ -d "${PROJECT_ROOT:-/nonexistent}" ]; then
+  if [ "$(readlink -f "$REPO")" != "$(readlink -f "$PROJECT_ROOT")" ]; then
+    note "this launcher is running from
+             $REPO
+           but the job will train from PROJECT_ROOT
+             $PROJECT_ROOT
+           These are different trees, so the preflight above checked files that will not
+           be the ones that run. Launch from the tree the job uses:
+             cd \"\$PROJECT_ROOT\" && git pull && bash slurm/selfdistill/launch_bg07.sh $MODE"
+  fi
 fi
 
 grep -q '^  birdmae_bg07)' slurm/selfdistill/selfdistill.sh \
