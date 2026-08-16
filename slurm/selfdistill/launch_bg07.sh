@@ -78,7 +78,14 @@ if [ "$MODE" = "estimate" ]; then
   STORE="${STORE:-mlruns_nibi}"
   [ -d "$STORE" ] || { echo "no run store at $STORE; set STORE=<path>" >&2; exit 1; }
   ARGS=(--mlruns "$STORE")
-  [ -n "${PER_EPOCH:-}" ] && ARGS+=(--per-epoch "$PER_EPOCH")
+  # By default, calibrate from this arm's own one-epoch run rather than from the median
+  # over the whole store, which mixes two backbones and two epoch counts. PER_EPOCH still
+  # wins if you have timed an epoch by hand.
+  if [ -n "${PER_EPOCH:-}" ]; then
+    ARGS+=(--per-epoch "$PER_EPOCH")
+  else
+    ARGS+=(--calib-run "${CALIB_RUN:-${ARM}_div${DIVERSITY_WEIGHT}_e1}")
+  fi
   ARGS+=(--plan "${PLAN:-birdmae_bg07:2:$MAX_EPOCHS}")
   # Stdlib only, so the login node's bare python3 is enough and no module load or venv
   # activation is needed. PYTHON is here for the workstation, where a hook requires the
@@ -267,15 +274,16 @@ echo "  cat \$OUTPUT_DIR/../mlruns/*/*/params/data/transform/augmentations/stude
 
 if [ "$MODE" = "calibrate" ]; then
   echo
-  echo "WHEN THE CALIBRATION RUN FINISHES, price the campaign from its one epoch:"
-  echo "  PER_EPOCH=<seconds> bash slurm/selfdistill/launch_bg07.sh estimate"
+  echo "WHEN THE CALIBRATION RUN FINISHES, price the campaign with:"
+  echo "  bash slurm/selfdistill/launch_bg07.sh estimate"
   echo
-  echo "Take the number from emissions/duration_s in the run's MLflow record:"
-  echo "  cat \$OUTPUT_DIR/mlruns/*/*/metrics/emissions/duration_s | tail -1"
+  echo "No number to copy. It finds this arm's own one-epoch run in the store by"
+  echo "name and reads the duration from it. PER_EPOCH=<seconds> still overrides,"
+  echo "and CALIB_RUN=<substring> picks a different run to calibrate from."
   echo
-  echo "NOT from sacct Elapsed. That includes untarring the clip archive before"
-  echo "training starts, which is minutes of work that happens once per job and"
-  echo "not once per epoch, so it would inflate every projection."
+  echo "Do NOT read sacct Elapsed for this. That covers the whole job, which begins"
+  echo "by untarring the clip archive: minutes of work that happen once per job and"
+  echo "not once per epoch, so it would inflate every projection built on it."
   echo
   echo "Treat the result as an UPPER BOUND on seconds per epoch. A one-epoch run"
   echo "validates once for its single epoch, whereas the real runs validate every"

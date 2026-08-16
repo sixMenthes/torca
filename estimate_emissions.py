@@ -229,7 +229,12 @@ def main():
                     help=f"datacentre PUE (default: {DEFAULT_PUE})")
     ap.add_argument("--per-epoch", type=float, default=None,
                     help="MEASURED seconds per epoch, e.g. from a one-epoch calibration "
-                         "run. Overrides the value calibrated from the store.")
+                         "run. Overrides everything else.")
+    ap.add_argument("--calib-run", default=None,
+                    help="calibrate from the NEWEST run whose name contains this "
+                         "substring, instead of the median over the whole store. This "
+                         "is the reliable way to price an arm from its own calibration "
+                         "job: pass e.g. 'bg07_div1.0_e1'.")
     ap.add_argument("--plan", default=None,
                     help="planned future work as name:runs:epochs[,...], e.g. "
                          "'birdmae_bg07:2:36'")
@@ -251,6 +256,20 @@ def main():
     calib = [r for r in trains if r["epochs"]]
     if args.per_epoch is not None:
         sec_per_epoch, calib_from = args.per_epoch, "measured, passed with --per-epoch"
+    elif args.calib_run:
+        # Newest by name, which sorts correctly because every task_name ends in a
+        # yyyy-mm-dd_HHMMSS stamp.
+        hits = [r for r in calib if args.calib_run in r["name"]]
+        if not hits:
+            names = "\n    ".join(r["name"] for r in trains) or "(none)"
+            sys.exit(f"no training run with epochs matching {args.calib_run!r}.\n"
+                     f"  runs available:\n    {names}")
+        pick = sorted(hits, key=lambda r: r["name"])[-1]
+        sec_per_epoch = pick["duration_s"] / pick["epochs"]
+        calib_from = (f"{pick['name']}: {pick['duration_s']:,.0f} s over "
+                      f"{pick['epochs']} epoch(s)")
+        if len(hits) > 1:
+            print(f"note: {len(hits)} runs matched {args.calib_run!r}; using the newest.")
     elif calib:
         rates = sorted(r["duration_s"] / r["epochs"] for r in calib)
         sec_per_epoch = rates[len(rates) // 2]
@@ -287,7 +306,7 @@ def main():
                                args.tdp, frac, UTIL_MID, args.pue, INTENSITY_MID)
         print(f"  GPU-only cost of ONE epoch, central constants: "
               f"{kwh_ep:.4f} kWh, {co2_ep * 1000:.2f} g CO2e")
-        if calib and args.per_epoch is None:
+        if calib and args.per_epoch is None and not args.calib_run:
             rates = sorted(r["duration_s"] / r["epochs"] for r in calib)
             med = rates[len(rates) // 2]
             print(f"  spread across runs : {rates[0]:,.0f} to {rates[-1]:,.0f} s/epoch, "
