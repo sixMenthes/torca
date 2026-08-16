@@ -97,6 +97,37 @@ note() { echo "  BLOCKED: $1" >&2; fail=1; }
   || note "ACCOUNT is still the placeholder def-XXXX. Re-run as:
              ACCOUNT=def-yourpi bash \$0 $MODE"
 
+# PROJECT_ROOT and DATA_ROOT default INSIDE selfdistill.sh to a path containing the
+# literal placeholder def-XXXX, and line ~429 does `cd "$PROJECT_ROOT"`. If they are not
+# set in the submitting shell, every job dies in about four seconds with
+#   cd: /home/<user>/projects/def-XXXX/<user>/torca: No such file or directory
+# which is what happened to the first eleven probe jobs of this study. sbatch defaults to
+# --export=ALL, so a value exported here reaches the job; this launcher deliberately does
+# NOT pass an explicit --export list, because that is what broke the inheritance last time.
+for var in PROJECT_ROOT DATA_ROOT; do
+  val="${!var:-}"
+  if [ -z "$val" ]; then
+    note "$var is not set in this shell. selfdistill.sh would fall back to a path
+           containing the literal def-XXXX and every job would die on cd. Export it:
+             export $var=\$HOME/projects/def-yourpi/\$USER$([ "$var" = PROJECT_ROOT ] && echo /torca)"
+  elif [ ! -d "$val" ]; then
+    note "$var=$val does not exist on this node."
+  elif [[ "$val" == *def-XXXX* ]]; then
+    note "$var=$val still contains the placeholder def-XXXX."
+  fi
+done
+
+# Resolved the same way selfdistill.sh resolves them, so a missing input is caught here
+# rather than after the job has queued, staged a tarball and then failed.
+if [ -n "${DATA_ROOT:-}" ] && [ -d "${DATA_ROOT:-/nonexistent}" ]; then
+  [ -f "${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}" ] \
+    || note "no clip tarball at ${TARBALL:-$DATA_ROOT/dclde_clips_3s.tar}. Run
+             prestage_selfdistill_data.sh on a LOGIN node first — compute nodes have no
+             internet, so the job cannot fetch it itself."
+  [ -d "${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}" ] \
+    || note "no Bird-MAE backbone at ${BIRDMAE_CKPT:-$DATA_ROOT/Bird-MAE-B}"
+fi
+
 grep -q '^  birdmae_bg07)' slurm/selfdistill/selfdistill.sh \
   || note "selfdistill.sh has no birdmae_bg07 arm, so every job would exit 1 on the
            unknown-arm branch. Pull before submitting."
