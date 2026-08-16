@@ -75,8 +75,26 @@ echo "mode: $MODE"
 # It touches no allocation and needs no account, so gating it behind the preflight would
 # only make it harder to run.
 if [ "$MODE" = "estimate" ]; then
-  STORE="${STORE:-mlruns_nibi}"
-  [ -d "$STORE" ] || { echo "no run store at $STORE; set STORE=<path>" >&2; exit 1; }
+  # Resolve the run store rather than assuming one. On the cluster it sits under the
+  # allocation directory, because OUTPUT_DIR defaults to DATA_ROOT and paths/cluster.yaml
+  # hangs mlruns/ off that. On the workstation it is the rsynced copy, conventionally
+  # named mlruns_nibi to make clear it did not originate there. Hardcoding either name
+  # breaks the script on the other machine.
+  if [ -n "${STORE:-}" ]; then
+    :
+  else
+    for cand in "${OUTPUT_DIR:-}/mlruns" "${DATA_ROOT:-}/mlruns" mlruns_nibi mlruns; do
+      case "$cand" in /mlruns) continue ;; esac   # empty OUTPUT_DIR/DATA_ROOT
+      if [ -d "$cand" ]; then STORE="$cand"; break; fi
+    done
+  fi
+  if [ -z "${STORE:-}" ] || [ ! -d "$STORE" ]; then
+    echo "no run store found. Tried \$OUTPUT_DIR/mlruns, \$DATA_ROOT/mlruns," >&2
+    echo "./mlruns_nibi and ./mlruns from $REPO. Set it explicitly:" >&2
+    echo "  STORE=\$DATA_ROOT/mlruns bash \$0 estimate" >&2
+    exit 1
+  fi
+  echo "run store: $STORE"
   ARGS=(--mlruns "$STORE")
   # By default, calibrate from this arm's own one-epoch run rather than from the median
   # over the whole store, which mixes two backbones and two epoch counts. PER_EPOCH still
