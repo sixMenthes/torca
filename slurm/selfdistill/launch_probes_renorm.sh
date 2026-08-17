@@ -5,6 +5,7 @@
 #
 #   bash slurm/selfdistill/launch_probes_renorm.sh              # everything
 #   bash slurm/selfdistill/launch_probes_renorm.sh presentation # the 6 adapted + 3 frozen
+#   bash slurm/selfdistill/launch_probes_renorm.sh bg07         # just the p=0.7 arm + C2
 #   DRY_RUN=1 bash slurm/selfdistill/launch_probes_renorm.sh    # print, submit nothing
 #
 # It is the companion to launch_renorm.sh: that script trains the eight cells, this one
@@ -181,7 +182,13 @@ ckpt_for() {
   # Newest last.ckpt under this task_name. `ls -t` over a glob rather than `find`,
   # because a partially written checkpoint from a still-running job would otherwise
   # be indistinguishable from a finished one by name alone.
-  ls -t "$OUTPUT_DIR"/runs/"$task"/*/*/*/checkpoints/last.ckpt 2>/dev/null | head -1
+  #
+  # The `|| true` is load-bearing. `ls` exits non-zero when the glob matches nothing, and
+  # this script runs with `set -o pipefail` under `set -e`, so without it the empty case
+  # killed the script at the `ckpt=$(ckpt_for ...)` assignment — silently, with status 2,
+  # before reaching the MISSING report below. That made the all-or-nothing guard
+  # unreachable in precisely the situation it exists for.
+  ls -t "$OUTPUT_DIR"/runs/"$task"/*/*/*/checkpoints/last.ckpt 2>/dev/null | head -1 || true
 }
 
 # --- the cells -------------------------------------------------------------
@@ -195,6 +202,29 @@ ckpt_for() {
 # augmentation probability, so they share a backbone, a network config and a front-end,
 # and probing the control on the beats path would be a category error.
 CELLS=()
+
+if [ "$WHICH" = "bg07" ]; then
+  # THE ATTRIBUTION CONTROL AT ITS HIGH DOSE, on its own. The other six adapted cells are
+  # already trained and already probed, and re-running them would spend GPU hours
+  # reproducing numbers the results table already carries.
+  #
+  # C2 is kept because it is the denominator of the claim and it is one 40-minute job.
+  # Its sealed value is already known to be 0.912259356862241, so the new run doubles as
+  # a check that this tree produces the same comparator as the tree that made the table:
+  # if it comes back different, something in the front-end path has moved and the p=0.7
+  # numbers cannot be compared against the existing rows either. Set WITH_C2=0 to skip it
+  # and accept the stored value instead.
+  #
+  # Note that this puts a THIRD C2_probe_sealed run in the store. Two already exist and
+  # they disagree — 0.9019737814832183 from 2026-08-09 08:20 and 0.912259356862241 from
+  # 11:33 — because the fbank renormalisation landed between them. The new one should
+  # match the later value. Read them by timestamp, never by label alone.
+  [ "${WITH_C2:-1}" = "1" ] \
+    && CELLS+=("C2|birdmae|||frozen Bird-MAE, the comparator and a tree check")
+  for seed in $SEEDS; do
+    CELLS+=("R_bg07_s${seed}|birdmae|$seed||attribution control at p = 0.7, the high dose")
+  done
+else
 
 # The frozen comparators first: they gate the interpretation of everything else, and if
 # the queue stalls halfway, a table of adapted numbers with no denominator is worthless.
@@ -214,6 +244,8 @@ if [ "$WHICH" != "presentation" ]; then
   done
 fi
 
+fi
+
 # --- resolve every checkpoint BEFORE submitting anything ------------------
 # All or nothing. A half-submitted batch is the worst outcome here, because the missing
 # cell is discovered hours later when the table is being assembled.
@@ -229,6 +261,7 @@ for cell in "${CELLS[@]}"; do
   # though it probes as birdmae.
   train_arm="$arm"
   [[ "$label" == R_nobg_* ]] && train_arm="birdmae_nobg"
+  [[ "$label" == R_bg07_* ]] && train_arm="birdmae_bg07"
   ckpt=$(ckpt_for "$train_arm" "$seed" "$levels")
   if [ -z "$ckpt" ]; then
     echo "  MISSING: no last.ckpt for $label (arm=$train_arm seed=$seed levels=${levels:-K1000})" >&2
