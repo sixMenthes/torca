@@ -201,6 +201,44 @@ def band(records, tdp_w, frac, pue):
     return out
 
 
+def parse_elapsed(s):
+    """Slurm Elapsed, [DD-]HH:MM:SS, to seconds."""
+    s = s.strip()
+    days = 0
+    if "-" in s:
+        d, s = s.split("-", 1)
+        days = int(d)
+    parts = [int(p) for p in s.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    h, m, sec = parts[-3:]
+    return days * 86400 + h * 3600 + m * 60 + sec
+
+
+def read_sacct(path):
+    """Parse `sacct -X -P --format=JobID,JobName,Elapsed,State` output.
+
+    -X gives one row per job rather than one per step, and -P makes it pipe-delimited.
+    This is the authoritative record of how long each allocation was HELD, which is what
+    the GPU costs and what the account is billed for. The MLflow store cannot substitute
+    for it: an MLflow run brackets the fit, so for a probe job it excludes extracting the
+    clip archive and running the encoder over 35k clips, and those dominate.
+    """
+    rows = []
+    for line in Path(path).read_text().splitlines():
+        parts = line.split("|")
+        if len(parts) < 4 or parts[0].strip() in ("JobID", ""):
+            continue
+        jobid, name, elapsed, state = (p.strip() for p in parts[:4])
+        try:
+            secs = parse_elapsed(elapsed)
+        except (ValueError, IndexError):
+            continue
+        rows.append({"jobid": jobid, "name": name, "seconds": secs,
+                     "state": state.split()[0]})
+    return rows
+
+
 def parse_plan(spec):
     """`name:runs:epochs[,name:runs:epochs...]` -> list of (name, n_runs, n_epochs)."""
     plan = []
@@ -238,6 +276,11 @@ def main():
     ap.add_argument("--plan", default=None,
                     help="planned future work as name:runs:epochs[,...], e.g. "
                          "'birdmae_bg07:2:36'")
+    ap.add_argument("--sacct", type=Path, default=None,
+                    help="file of `sacct -X -P --format=JobID,JobName,Elapsed,State` "
+                         "output. Slurm is the authority on how long each allocation "
+                         "was HELD, which is what the GPU actually costs; the MLflow "
+                         "store only brackets the fit and undercounts probe jobs badly.")
     ap.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = ap.parse_args()
 
@@ -326,11 +369,80 @@ def main():
     measured = sum(r["cpu_kwh"] + r["ram_kwh"] for r in records)
     print(f"  measured CPU + RAM energy : {measured:,.3f} kWh (from the tracker)")
 
-    b = band(records, args.tdp, frac, args.pue)
-    print(f"\n  {'scenario':<10}{'util':>7}{'gCO2e/kWh':>12}{'kWh':>12}{'kg CO2e':>12}")
+    # Where the wall clock came from, because the two sources are not equivalent. The
+    # tracker brackets the fit; meta.yaml brackets the whole MLflow run, which for a
+    # probe job includes extracting the clip archive. Probe runs have no tracker
+    # duration at all, so they are always the second kind.
+    from_meta = [r for r in records if r["duration_source"] == "meta"]
+    if from_meta:
+        meta_h = sum(r["duration_s"] for r in from_meta) / 3600.0
+        print(f"  of which timed from meta  : {len(from_meta)} runs, {meta_h:,.1f} h "
+              f"({100 * meta_h / gpu_h:.0f}% of the total)")
+        print("                              These bracket the whole run rather than the")
+        print("                              fit, so they include staging and read high.")
+
+    # Split by kind. A cost table wants training and probing separately, because the two
+    # are spent for different reasons and only one of them scales with the number of arms.
+    print(f"\n  {'':<12}{'runs':>6}{'hours':>9}{'kWh':>9}{'kg CO2e':>10}   (central)")
+    for kind, group in (("training", trains), ("probes", probes), ("all", records)):
+        if not group:
+            continue
+        h = sum(r["duration_s"] for r in group) / 3600.0
+        kwh = co2 = 0.0
+        for r in group:
+            k, c = price(r, args.tdp, frac, UTIL_MID, args.pue, INTENSITY_MID)
+            kwh += k
+            co2 += c
+        print(f"  {kind:<12}{len(group):>6}{h:>9.1f}{kwh:>9.2f}{co2:>10.3f}")
+
+    # --- Slurm's own accounting, which supersedes the above ----------------
+    sacct_records = records
+    if args.sacct:
+        jobs = read_sacct(args.sacct)
+        done = [j for j in jobs if j["state"] == "COMPLETED"]
+        other = [j for j in jobs if j["state"] != "COMPLETED"]
+        s_h = sum(j["seconds"] for j in done) / 3600.0
+        print("\n" + "-" * 78)
+        print("SLURM ACCOUNTING (authoritative for allocation time)")
+        print("-" * 78)
+        print(f"  jobs in the file          : {len(jobs)} "
+              f"({len(done)} COMPLETED, {len(other)} other)")
+        if other:
+            states = {}
+            for j in other:
+                states[j["state"]] = states.get(j["state"], 0) + 1
+            print(f"  non-completed states      : "
+                  f"{', '.join(f'{k} x{v}' for k, v in sorted(states.items()))}")
+            print("                              Failed and timed-out jobs still HELD the")
+            print("                              allocation, so their time is counted too")
+            print("                              in the 'all jobs' row below.")
+        all_h = sum(j["seconds"] for j in jobs) / 3600.0
+        print(f"  GPU-hours held, completed : {s_h:,.1f} h")
+        print(f"  GPU-hours held, all jobs  : {all_h:,.1f} h")
+        print(f"  MLflow-derived, for compar: {gpu_h:,.1f} h "
+              f"({100 * gpu_h / all_h:.0f}% of it)")
+        print("\n  The gap is the part of each job that MLflow never sees: staging the")
+        print("  clip archive, building the front-end, and extracting features. The GPU")
+        print("  is allocated for all of it, so the Slurm figure is the one to report.")
+        # Re-price on Slurm time. CPU and RAM stay as measured, and are now a FLOOR,
+        # because the tracker only ran during the fit.
+        sacct_records = [{"duration_s": sum(j["seconds"] for j in jobs),
+                          "cpu_kwh": sum(r["cpu_kwh"] for r in records),
+                          "ram_kwh": sum(r["ram_kwh"] for r in records)}]
+
+    b = band(sacct_records, args.tdp, frac, args.pue)
+    label = "on Slurm-accounted time" if args.sacct else "on MLflow-derived time"
+    print(f"\n  {'scenario':<10}{'util':>7}{'gCO2e/kWh':>12}{'kWh':>12}{'kg CO2e':>12}"
+          f"   ({label})")
     for tag in ("low", "central", "high"):
         kwh, co2, util, inten = b[tag]
         print(f"  {tag:<10}{util:>7.2f}{inten:>12.0f}{kwh:>12.2f}{co2:>12.3f}")
+    if not args.sacct:
+        print("\n  These are timed from MLflow and therefore UNDERCOUNT, because an")
+        print("  MLflow run brackets the fit rather than the job. Pass --sacct for the")
+        print("  figure to report. Generate the file on the cluster with:")
+        print("    sacct -X -P --format=JobID,JobName,Elapsed,State -S 2026-08-01 "
+              "> sacct.txt")
 
     logged = sum(r["co2_logged"] or 0.0 for r in records)
     central = b["central"][1]
